@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: thesis-ai-backend
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: AGENT_MODE
+        value: mock
+      - key: AUTO_APPROVE_MEDIUM_RISK
+        value: "true"
+      - key: ALLOW_INSECURE_WORDPRESS
+        value: "false"
+      - key: ALLOW_PRIVATE_WORDPRESS
+        value: "false"
