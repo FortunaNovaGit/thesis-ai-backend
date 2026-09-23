@@ -1,8 +1,8 @@
 # QUICK START — v0.4 Elementor + Plugins
 
 1. Онови backend repository файлами v0.4 і зроби Push. Render зробить auto-deploy.
-2. Перевір: `https://YOUR-SERVICE.onrender.com/health` → version `0.4.0`.
-3. У WordPress онови Thesis AI Bridge до v0.4.0.
+2. Перевір: `https://YOUR-SERVICE.onrender.com/health` → version `0.4.1`.
+3. У WordPress онови Thesis AI Bridge до v0.4.1.
 4. AI Website Builder має лишитися підключеним. Якщо Render Free втратив connection state після redeploy — натисни Disconnect/Connect ще раз.
 5. У формі Build вибери **Elementor Free — основний**.
 6. Залиш увімкненим **Автоматично встановлювати/активувати потрібні approved plugins**.

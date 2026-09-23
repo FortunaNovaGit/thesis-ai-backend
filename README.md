@@ -1,4 +1,4 @@
-# WordPress Multi-Agent Thesis MVP v0.4.0
+# WordPress Multi-Agent Thesis MVP v0.4.1
 
 Ця версія додає повний preflight сайту, автоматичну інвентаризацію plugins, capability resolution, безпечне auto-install/activate approved plugins та Elementor Free adapter.
 
@@ -37,7 +37,7 @@ Browser/Playwright QA ще не підключений і не заявляєт�
 
 ## Render
 
-Поточний backend сумісний з Render Docker Web Service. Після push нового коду Render auto-deploy має показати `/health` version `0.4.0`.
+Поточний backend сумісний з Render Docker Web Service. Після push нового коду Render auto-deploy має показати `/health` version `0.4.1`.
 
 ## Важливо для Render Free
 

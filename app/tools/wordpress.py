@@ -288,7 +288,7 @@ class RemoteWordPressExecutor(WordPressExecutor):
             auth=self.auth,
             timeout=self.timeout,
             verify=self.verify,
-            headers={"User-Agent": "Thesis-AI-Backend/0.4.0", "Accept": "application/json"},
+            headers={"User-Agent": "Thesis-AI-Backend/0.4.1", "Accept": "application/json"},
             follow_redirects=True,
         )
 
@@ -319,12 +319,23 @@ class RemoteWordPressExecutor(WordPressExecutor):
             async with self._client() as client:
                 response = await client.request(method, url, params=params, json=json_body)
 
-            if response.status_code == 401:
-                raise RuntimeError("WordPress authentication failed (401). Check username and Application Password.")
-            if response.status_code == 403:
-                raise RuntimeError("WordPress authenticated the request but the user/API is not allowed (403). Check AI Builder role and Bridge settings.")
-
             body = response.text or ""
+            if response.status_code in {401, 403}:
+                wp_code = ""
+                wp_message = ""
+                try:
+                    payload = response.json()
+                    if isinstance(payload, dict):
+                        wp_code = str(payload.get("code", ""))
+                        wp_message = str(payload.get("message", ""))
+                except Exception:
+                    pass
+                if response.status_code == 401:
+                    detail = f" WordPress error {wp_code}: {wp_message}" if (wp_code or wp_message) else ""
+                    raise RuntimeError(f"WordPress authentication failed (401).{detail} Check username and Application Password.")
+                detail = f" WordPress error {wp_code}: {wp_message}" if (wp_code or wp_message) else ""
+                raise RuntimeError(f"WordPress denied the operation (403).{detail} Check Bridge permissions/settings.")
+
             content_type = response.headers.get("content-type", "")
             history = " -> ".join(
                 f"{item.status_code}:{item.url}" for item in response.history

@@ -74,7 +74,28 @@ def _validate_site_url(site_url: str) -> str:
 def _result_summary(run) -> dict[str, Any]:
     pages: list[dict[str, Any]] = []
     plugins: list[dict[str, Any]] = []
+    failed_actions: list[dict[str, Any]] = []
+    executed_actions_count = 0
+
+    def safe_parameters(parameters: dict[str, Any]) -> dict[str, Any]:
+        # Never return arbitrary generated content or secrets to the WordPress admin UI.
+        allowed = {"plugin_slug", "page_id", "title", "slug"}
+        return {key: value for key, value in parameters.items() if key in allowed}
+
     for execution in run.executions:
+        if execution.executed:
+            executed_actions_count += 1
+        else:
+            failed_actions.append({
+                "ability": execution.action.ability,
+                "rationale": execution.action.rationale,
+                "parameters": safe_parameters(execution.action.parameters),
+                "risk": execution.policy.risk.value,
+                "policy_outcome": execution.policy.outcome.value,
+                "policy_reason": execution.policy.reason,
+                "error": execution.error or "Unknown execution error",
+            })
+
         if not execution.executed or not isinstance(execution.result, dict):
             continue
         if execution.action.ability in {"thesis-ai-bridge/create-draft-page", "thesis-ai-bridge/ensure-draft-page", "thesis-ai-bridge/elementor-ensure-draft-page"}:
@@ -100,15 +121,19 @@ def _result_summary(run) -> dict[str, Any]:
         "pages": pages,
         "plugins": plugins,
         "issues": issues,
+        "failed_actions": failed_actions,
+        "executed_actions_count": executed_actions_count,
+        "failed_actions_count": len(failed_actions),
         "quality_summary": run.quality_reports[-1].summary if run.quality_reports else "",
         "renderer": run.renderer,
         "plugin_inventory_count": len(run.site_snapshot.plugins) if run.site_snapshot else 0,
+        "site_capabilities": run.site_snapshot.capabilities if run.site_snapshot else {},
     }
 
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.4.0", "agent_mode": settings.agent_mode}
+    return {"status": "ok", "version": "0.4.1", "agent_mode": settings.agent_mode}
 
 
 @app.post("/v1/sites/connect")

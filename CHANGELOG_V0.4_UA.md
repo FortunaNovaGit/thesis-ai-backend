@@ -1,4 +1,4 @@
-# v0.4.0 — що саме реалізовано
+# v0.4.1 — що саме реалізовано
 
 - Real site preflight before agents plan changes.
 - Full installed plugin inventory with active/version/update metadata.
