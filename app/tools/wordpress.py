@@ -211,7 +211,7 @@ class RemoteWordPressExecutor(WordPressExecutor):
             auth=self.auth,
             timeout=self.timeout,
             verify=self.verify,
-            headers={"User-Agent": "Thesis-AI-Backend/0.3.2"},
+            headers={"User-Agent": "Thesis-AI-Backend/0.3.3", "Accept": "application/json"},
             follow_redirects=True,
         )
 
@@ -219,21 +219,65 @@ class RemoteWordPressExecutor(WordPressExecutor):
         if self._probe_cache is not None:
             return self._probe_cache
 
-        url = f"{self.base}/wp-json/thesis-ai/v1/status"
-        async with self._client() as client:
-            response = await client.get(url)
-        if response.status_code == 401:
-            raise RuntimeError("WordPress authentication failed (401). Check username and Application Password.")
-        if response.status_code == 403:
-            raise RuntimeError("WordPress authenticated the request but the user/API is not allowed (403). Check AI Builder role and Bridge settings.")
-        if response.status_code in {404, 405}:
-            raise RuntimeError("Thesis AI Bridge status endpoint was not found. Install/activate Thesis AI Bridge v0.3 first.")
-        response.raise_for_status()
-        data = response.json()
+        candidates = [
+            (f"{self.base}/wp-json/thesis-ai/v1/status/", None),
+            (f"{self.base}/", {"rest_route": "/thesis-ai/v1/status"}),
+        ]
+        data = await self._request_json_candidates("GET", candidates, context="Bridge status")
         if not isinstance(data, dict):
             raise RuntimeError("Unexpected Bridge status response")
         self._probe_cache = data
         return data
+
+    async def _request_json_candidates(
+        self,
+        method: str,
+        candidates: list[tuple[str, dict[str, str] | None]],
+        *,
+        context: str,
+        json_body: dict[str, Any] | None = None,
+    ) -> Any:
+        diagnostics: list[str] = []
+        for url, params in candidates:
+            async with self._client() as client:
+                response = await client.request(method, url, params=params, json=json_body)
+
+            if response.status_code == 401:
+                raise RuntimeError("WordPress authentication failed (401). Check username and Application Password.")
+            if response.status_code == 403:
+                raise RuntimeError("WordPress authenticated the request but the user/API is not allowed (403). Check AI Builder role and Bridge settings.")
+
+            body = response.text or ""
+            content_type = response.headers.get("content-type", "")
+            history = " -> ".join(
+                f"{item.status_code}:{item.url}" for item in response.history
+            )
+            detail = (
+                f"url={response.url}; status={response.status_code}; "
+                f"content-type={content_type or 'unknown'}; "
+                f"redirects={history or 'none'}; body={body[:180]!r}"
+            )
+
+            if response.status_code in {404, 405}:
+                diagnostics.append(detail)
+                continue
+
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError:
+                diagnostics.append(detail)
+                continue
+
+            try:
+                return response.json()
+            except ValueError:
+                diagnostics.append(detail)
+                continue
+
+        joined = " | ".join(diagnostics)
+        raise RuntimeError(
+            f"{context} did not return usable JSON through either WordPress REST URL form. {joined}"
+        )
 
     async def execute(self, action: BuildAction) -> Any:
         if not action.ability.startswith("thesis-ai-bridge/"):
@@ -259,11 +303,16 @@ class RemoteWordPressExecutor(WordPressExecutor):
 
     async def _execute_bridge_rest(self, action: BuildAction) -> Any:
         _, ability_name = action.ability.split("/", 1)
-        url = f"{self.base}/wp-json/thesis-ai/v1/run/{ability_name}"
-        async with self._client() as client:
-            response = await client.post(url, json={"input": action.parameters})
-        self._raise_wordpress_error(response)
-        data = response.json()
+        candidates = [
+            (f"{self.base}/wp-json/thesis-ai/v1/run/{ability_name}/", None),
+            (f"{self.base}/", {"rest_route": f"/thesis-ai/v1/run/{ability_name}"}),
+        ]
+        data = await self._request_json_candidates(
+            "POST",
+            candidates,
+            context=f"Bridge ability {ability_name}",
+            json_body={"input": action.parameters},
+        )
         return data.get("result", data) if isinstance(data, dict) else data
 
     async def _execute_native_abilities(self, action: BuildAction) -> Any:

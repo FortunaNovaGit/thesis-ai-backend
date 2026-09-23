@@ -16,7 +16,7 @@ from .tools.wordpress import RemoteWordPressExecutor, make_wordpress_executor
 from .workflow import MultiAgentWorkflow
 
 
-app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.3.2")
+app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.3.3")
 site_store = SiteStore(Path(settings.backend_data_file), Path(settings.backend_key_file))
 
 
@@ -104,7 +104,7 @@ def _result_summary(run) -> dict[str, Any]:
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.3.2", "agent_mode": settings.agent_mode}
+    return {"status": "ok", "version": "0.3.3", "agent_mode": settings.agent_mode}
 
 
 @app.post("/v1/sites/connect")
