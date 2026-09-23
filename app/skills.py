@@ -16,7 +16,7 @@ SKILLS: dict[AgentRole, list[dict[str, str]]] = {
         {"name": "wp-project-triage", "type": "official-wordpress", "purpose": "Inspect project type, tooling and versions."},
         {"name": "acf-free-data-model", "type": "project", "purpose": "Model CPTs, taxonomies and free ACF fields."},
         {"name": "capability-resolver", "type": "project", "purpose": "Map requirements to Core, existing plugin, approved plugin or custom ability."},
-        {"name": "plugin-selection", "type": "project", "purpose": "Choose only approved, compatible free plugins."},
+        {"name": "plugin-selection", "type": "project", "purpose": "Inspect installed plugins first, reuse existing approved capabilities, and choose only approved compatible free plugins when gaps remain."},
     ],
     AgentRole.DESIGN: [
         {"name": "wp-block-themes", "type": "official-wordpress", "purpose": "Design with theme.json, templates, patterns and global styles."},
@@ -26,6 +26,7 @@ SKILLS: dict[AgentRole, list[dict[str, str]]] = {
         {"name": "content-writing", "type": "project", "purpose": "Write page content from business context and page goals."},
     ],
     AgentRole.BUILDER: [
+        {"name": "elementor-adapter", "type": "project", "purpose": "Render controlled PageSpec structures as editable Elementor Free documents."},
         {"name": "wp-block-development", "type": "official-wordpress", "purpose": "Build Gutenberg blocks correctly."},
         {"name": "wp-block-themes", "type": "official-wordpress", "purpose": "Implement block theme structures and styles."},
         {"name": "wp-plugin-development", "type": "official-wordpress", "purpose": "Follow WordPress plugin patterns and security practices."},

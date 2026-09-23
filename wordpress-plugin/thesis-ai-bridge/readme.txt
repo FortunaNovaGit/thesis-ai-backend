@@ -3,7 +3,7 @@ Contributors: thesis-prototype
 Tags: ai, abilities-api, rest-api, automation, wordpress
 Requires at least: 6.6
 Requires PHP: 8.0
-Stable tag: 0.3.0
+Stable tag: 0.4.0
 License: GPLv2 or later
 
 Controlled WordPress execution layer for a five-agent master's thesis prototype.

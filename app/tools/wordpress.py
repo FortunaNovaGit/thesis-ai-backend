@@ -30,7 +30,7 @@ class MockWordPressExecutor(WordPressExecutor):
         return {
             "mode": "mock",
             "status": "ok",
-            "bridge_version": "0.3.0-mock",
+            "bridge_version": "0.4.0-mock",
             "native_abilities_api": True,
         }
 
@@ -51,7 +51,7 @@ class MockWordPressExecutor(WordPressExecutor):
                 "https": False,
                 "multisite": False,
                 "native_abilities_api": True,
-                "bridge_version": "0.3.0-mock",
+                "bridge_version": "0.4.0-mock",
             }
         if ability == "thesis-ai-bridge/list-pages":
             return self.pages
@@ -98,7 +98,64 @@ class MockWordPressExecutor(WordPressExecutor):
             self.homepage_id = int(p["page_id"])
             return {"homepage_id": self.homepage_id, "show_on_front": "page"}
         if ability == "thesis-ai-bridge/list-plugins":
-            return list(self.plugins.values())
+            result = []
+            for slug, record in self.plugins.items():
+                result.append({
+                    "file": record.get("plugin_file", f"{slug}/{slug}.php"),
+                    "slug": slug,
+                    "name": slug.replace("-", " ").title(),
+                    "version": record.get("version", "1.0.0"),
+                    "active": bool(record.get("active")),
+                    "approved": slug in {"elementor", "woocommerce", "advanced-custom-fields", "contact-form-7", "wordpress-seo", "seo-by-rank-math"},
+                    "update_available": False,
+                    "new_version": "",
+                    "requires_php": "",
+                    "requires_wp": "",
+                })
+            return result
+        if ability == "thesis-ai-bridge/inspect-capabilities":
+            active = {slug for slug, record in self.plugins.items() if record.get("active")}
+            return {
+                "approved_plugins": {slug: {"name": slug, "installed": slug in self.plugins, "active": slug in active, "version": self.plugins.get(slug, {}).get("version", ""), "update_available": False} for slug in ["elementor", "woocommerce", "advanced-custom-fields", "contact-form-7", "wordpress-seo", "seo-by-rank-math"]},
+                "recognized_capabilities": {
+                    "page_builder_elementor": "elementor" in active,
+                    "ecommerce": "woocommerce" in active,
+                    "structured_content": "advanced-custom-fields" in active,
+                    "forms": "contact-form-7" in active,
+                    "seo": bool(active & {"wordpress-seo", "seo-by-rank-math"}),
+                },
+                "plugin_management_enabled": True,
+                "filesystem_method": "direct",
+                "elementor": {"installed": "elementor" in self.plugins, "active": "elementor" in active, "version": self.plugins.get("elementor", {}).get("version", ""), "runtime_loaded": "elementor" in active, "plugin_file": "elementor/elementor.php" if "elementor" in self.plugins else ""},
+            }
+        if ability == "thesis-ai-bridge/get-approved-plugin-info":
+            slug = str(p["plugin_slug"])
+            return {"plugin_slug": slug, "name": slug.replace("-", " ").title(), "version": "1.0.0", "requires": "", "requires_php": "", "tested": "", "active_installs": 0, "rating": 0}
+        if ability == "thesis-ai-bridge/elementor-get-status":
+            record = self.plugins.get("elementor")
+            return {"installed": record is not None, "active": bool(record and record.get("active")), "version": record.get("version", "") if record else "", "runtime_loaded": bool(record and record.get("active")), "plugin_file": "elementor/elementor.php" if record else ""}
+        if ability == "thesis-ai-bridge/elementor-get-page":
+            page_id = int(p["page_id"])
+            page = next((x for x in self.pages if x["id"] == page_id), None)
+            if not page:
+                raise RuntimeError(f"Mock page {page_id} not found")
+            return {**page, "built_with_elementor": bool(page.get("elementor_elements")), "elements": page.get("elementor_elements", []), "edit_url": f"http://mock.local/wp-admin/post.php?post={page_id}&action=elementor"}
+        if ability == "thesis-ai-bridge/elementor-ensure-draft-page":
+            if not self.plugins.get("elementor", {}).get("active"):
+                raise RuntimeError("Elementor is not active")
+            slug = str(p.get("slug", ""))
+            existing = next((x for x in self.pages if x.get("slug") == slug), None)
+            if existing:
+                existing["title"] = p.get("title", existing["title"])
+                existing["elementor_elements"] = p.get("elements", [])
+                return {**existing, "built_with_elementor": True, "elements": existing["elementor_elements"], "edit_url": f"http://mock.local/wp-admin/post.php?post={existing['id']}&action=elementor"}
+            page = {
+                "id": self._next_id, "title": p.get("title", "Untitled"), "slug": slug, "content": "", "status": "draft", "author": 1,
+                "url": f"http://mock.local/?page_id={self._next_id}", "elementor_elements": p.get("elements", []),
+            }
+            self._next_id += 1
+            self.pages.append(page)
+            return {**page, "built_with_elementor": True, "elements": page["elementor_elements"], "edit_url": f"http://mock.local/wp-admin/post.php?post={page['id']}&action=elementor"}
         if ability == "thesis-ai-bridge/install-approved-plugin":
             slug = str(p["plugin_slug"])
             record = self.plugins.setdefault(slug, {
@@ -124,6 +181,22 @@ class MockWordPressExecutor(WordPressExecutor):
             record["changed"] = True
             record["message"] = "Mock plugin activated."
             return record
+        if ability == "thesis-ai-bridge/ensure-approved-plugin":
+            slug = str(p["plugin_slug"])
+            record = self.plugins.setdefault(slug, {
+                "plugin_slug": slug,
+                "plugin_file": f"{slug}/{slug}.php",
+                "installed": True,
+                "active": False,
+                "changed": True,
+                "message": "Mock plugin installed.",
+                "version": "1.0.0",
+            })
+            changed = not bool(record.get("active"))
+            record["active"] = True
+            record["changed"] = changed
+            record["message"] = "Mock plugin installed and activated." if changed else "Mock plugin already installed and active."
+            return record
         if ability == "thesis-ai-bridge/deactivate-approved-plugin":
             slug = str(p["plugin_slug"])
             record = self.plugins.get(slug)
@@ -139,7 +212,7 @@ class MockWordPressExecutor(WordPressExecutor):
 
 
 class RemoteWordPressExecutor(WordPressExecutor):
-    """Authenticated remote executor for Thesis AI Bridge v0.3.
+    """Authenticated remote executor for Thesis AI Bridge v0.4.
 
     Transport modes:
     - bridge_rest: always use the plugin's stable /thesis-ai/v1 fallback API.
@@ -153,6 +226,10 @@ class RemoteWordPressExecutor(WordPressExecutor):
         "thesis-ai-bridge/list-pages",
         "thesis-ai-bridge/get-page",
         "thesis-ai-bridge/list-plugins",
+        "thesis-ai-bridge/inspect-capabilities",
+        "thesis-ai-bridge/get-approved-plugin-info",
+        "thesis-ai-bridge/elementor-get-status",
+        "thesis-ai-bridge/elementor-get-page",
     }
 
     def __init__(self, settings: Settings) -> None:
@@ -211,7 +288,7 @@ class RemoteWordPressExecutor(WordPressExecutor):
             auth=self.auth,
             timeout=self.timeout,
             verify=self.verify,
-            headers={"User-Agent": "Thesis-AI-Backend/0.3.3", "Accept": "application/json"},
+            headers={"User-Agent": "Thesis-AI-Backend/0.4.0", "Accept": "application/json"},
             follow_redirects=True,
         )
 

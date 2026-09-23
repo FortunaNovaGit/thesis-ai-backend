@@ -27,6 +27,9 @@ class PolicyOutcome(str, Enum):
     BLOCK = "block"
 
 
+Renderer = Literal["elementor", "gutenberg", "auto"]
+
+
 class TaskItem(BaseModel):
     id: str
     title: str
@@ -38,6 +41,21 @@ class TaskItem(BaseModel):
 class TaskPlan(BaseModel):
     project_summary: str
     tasks: list[TaskItem]
+
+
+class SiteSnapshot(BaseModel):
+    site_info: dict[str, Any] = Field(default_factory=dict)
+    plugins: list[dict[str, Any]] = Field(default_factory=list)
+    capabilities: dict[str, Any] = Field(default_factory=dict)
+
+    def plugin_state(self, slug: str) -> dict[str, Any] | None:
+        for plugin in self.plugins:
+            if str(plugin.get("slug", "")) == slug:
+                return plugin
+        approved = self.capabilities.get("approved_plugins", {})
+        if isinstance(approved, dict) and isinstance(approved.get(slug), dict):
+            return approved[slug]
+        return None
 
 
 class PageRequirement(BaseModel):
@@ -81,9 +99,19 @@ class SeoSpec(BaseModel):
     schema_types: list[str] = Field(default_factory=list)
 
 
+class SectionContentSpec(BaseModel):
+    section_type: str
+    heading: str
+    body: str = ""
+    items: list[str] = Field(default_factory=list)
+    cta_label: str | None = None
+    cta_url: str | None = None
+
+
 class PageExperienceSpec(BaseModel):
     page_name: str
     sections: list[str]
+    section_specs: list[SectionContentSpec] = Field(default_factory=list)
     content_guidance: list[str]
     responsive_notes: list[str]
     accessibility_notes: list[str]
@@ -142,10 +170,12 @@ class QualityReport(BaseModel):
 class ProjectRun(BaseModel):
     run_id: str
     user_request: str
+    renderer: Renderer = "elementor"
     task_plan: TaskPlan | None = None
+    site_snapshot: SiteSnapshot | None = None
     application_spec: ApplicationSpec | None = None
     experience_spec: ExperienceSpec | None = None
     build_plan: BuildPlan | None = None
     executions: list[ActionExecution] = Field(default_factory=list)
     quality_reports: list[QualityReport] = Field(default_factory=list)
-    status: Literal["created", "planned", "specified", "built", "needs_approval", "failed", "passed"] = "created"
+    status: Literal["created", "inspected", "planned", "specified", "built", "needs_approval", "failed", "passed"] = "created"

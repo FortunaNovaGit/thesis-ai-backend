@@ -25,11 +25,11 @@ After deploy open:
 `https://YOUR-SERVICE.onrender.com/health`
 
 Expected JSON:
-`{"status":"ok","version":"0.3.0","agent_mode":"mock"}`
+`{"status":"ok","version":"0.4.0","agent_mode":"mock"}`
 
 ## Important limitation
 This test build stores connected-site state on Render's local filesystem. Free Render web services do not provide a persistent disk. A redeploy/restart can therefore require reconnecting the WordPress plugin. This is acceptable for the first end-to-end test; the next version should move site state to PostgreSQL or another persistent store.
 
 
-## v0.3.2
+## v0.4.0
 Backend HTTP client now follows safe canonical redirects (for example EasyWP adding a trailing slash to REST routes).

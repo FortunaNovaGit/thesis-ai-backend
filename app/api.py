@@ -16,12 +16,13 @@ from .tools.wordpress import RemoteWordPressExecutor, make_wordpress_executor
 from .workflow import MultiAgentWorkflow
 
 
-app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.3.3")
+app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.4.0")
 site_store = SiteStore(Path(settings.backend_data_file), Path(settings.backend_key_file))
 
 
 class BuildRequest(BaseModel):
     request: str = Field(min_length=10, max_length=6000)
+    renderer: str = Field(default="elementor", pattern="^(elementor|gutenberg|auto)$")
 
 
 class ConnectRequest(BaseModel):
@@ -76,14 +77,15 @@ def _result_summary(run) -> dict[str, Any]:
     for execution in run.executions:
         if not execution.executed or not isinstance(execution.result, dict):
             continue
-        if execution.action.ability in {"thesis-ai-bridge/create-draft-page", "thesis-ai-bridge/ensure-draft-page"}:
+        if execution.action.ability in {"thesis-ai-bridge/create-draft-page", "thesis-ai-bridge/ensure-draft-page", "thesis-ai-bridge/elementor-ensure-draft-page"}:
             pages.append({
                 "id": execution.result.get("id"),
                 "title": execution.result.get("title", execution.action.parameters.get("title", "")),
                 "status": execution.result.get("status", "draft"),
                 "url": execution.result.get("url"),
+                "edit_url": execution.result.get("edit_url"),
             })
-        if execution.action.ability in {"thesis-ai-bridge/install-approved-plugin", "thesis-ai-bridge/activate-approved-plugin"}:
+        if execution.action.ability in {"thesis-ai-bridge/install-approved-plugin", "thesis-ai-bridge/activate-approved-plugin", "thesis-ai-bridge/ensure-approved-plugin"}:
             plugins.append({
                 "slug": execution.result.get("plugin_slug"),
                 "active": execution.result.get("active"),
@@ -99,12 +101,14 @@ def _result_summary(run) -> dict[str, Any]:
         "plugins": plugins,
         "issues": issues,
         "quality_summary": run.quality_reports[-1].summary if run.quality_reports else "",
+        "renderer": run.renderer,
+        "plugin_inventory_count": len(run.site_snapshot.plugins) if run.site_snapshot else 0,
     }
 
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.3.3", "agent_mode": settings.agent_mode}
+    return {"status": "ok", "version": "0.4.0", "agent_mode": settings.agent_mode}
 
 
 @app.post("/v1/sites/connect")
@@ -180,7 +184,7 @@ async def build_connected_site(site_id: str, payload: BuildRequest, authorizatio
         wordpress,
     )
     try:
-        run = await workflow.run(payload.request)
+        run = await workflow.run(payload.request, payload.renderer)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Build failed: {exc}") from exc
     return _result_summary(run)
@@ -211,4 +215,4 @@ async def build_site(payload: BuildRequest):
         make_agent_runtime(settings.agent_mode, settings.openai_model),
         make_wordpress_executor(settings),
     )
-    return await workflow.run(payload.request)
+    return await workflow.run(payload.request, payload.renderer)

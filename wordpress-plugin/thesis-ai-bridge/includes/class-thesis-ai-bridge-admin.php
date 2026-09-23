@@ -86,7 +86,12 @@ final class Thesis_AI_Bridge_Admin {
     public static function build(): void {
         self::require_admin('thesis_ai_build');
         $prompt = isset($_POST['website_prompt']) ? sanitize_textarea_field(wp_unslash((string)$_POST['website_prompt'])) : '';
-        $result = Thesis_AI_Cloud::build($prompt);
+        $renderer = isset($_POST['renderer']) ? sanitize_key(wp_unslash((string)$_POST['renderer'])) : 'elementor';
+        $renderer = in_array($renderer, ['elementor', 'gutenberg', 'auto'], true) ? $renderer : 'elementor';
+        $settings = Thesis_AI_Bridge::get_settings();
+        $settings['plugin_management_enabled'] = !empty($_POST['allow_approved_plugins']);
+        update_option(self::OPTION_SETTINGS, Thesis_AI_Bridge::sanitize_settings($settings), false);
+        $result = Thesis_AI_Cloud::build($prompt, $renderer);
         self::redirect_with_result('build', $result);
     }
 
@@ -143,7 +148,17 @@ final class Thesis_AI_Bridge_Admin {
                         <input type="hidden" name="action" value="<?php echo $connected ? 'thesis_ai_build' : 'thesis_ai_demo_build'; ?>">
                         <?php wp_nonce_field($connected ? 'thesis_ai_build' : 'thesis_ai_demo_build'); ?>
                         <textarea class="thesis-ai-prompt" name="website_prompt" placeholder="Наприклад: Створи сучасний сайт стоматології українською мовою. Потрібні Головна, Послуги, Лікарі, Про нас, Контакти та форма запису." required></textarea>
-                        <p class="description"><?php echo $connected ? esc_html__('Буде запущено реальний 5-агентний workflow. У v0.3 сторінки залишаються draft і не публікуються автоматично.', 'thesis-ai-bridge') : esc_html__('Backend ще не підключений, тому кнопка запустить локальне демо execution layer. Воно НЕ є запуском п’яти AI-агентів.', 'thesis-ai-bridge'); ?></p>
+                        <?php if ($connected) : ?>
+                            <p><label><strong><?php echo esc_html__('Конструктор сторінок', 'thesis-ai-bridge'); ?></strong><br>
+                                <select name="renderer" style="min-width:260px;margin-top:5px">
+                                    <option value="elementor" selected><?php echo esc_html__('Elementor Free — основний', 'thesis-ai-bridge'); ?></option>
+                                    <option value="gutenberg"><?php echo esc_html__('Gutenberg — fallback', 'thesis-ai-bridge'); ?></option>
+                                    <option value="auto"><?php echo esc_html__('Auto — віддати вибір системі', 'thesis-ai-bridge'); ?></option>
+                                </select>
+                            </label></p>
+                            <p><label><input type="checkbox" name="allow_approved_plugins" value="1" checked> <strong><?php echo esc_html__('Автоматично встановлювати/активувати потрібні approved plugins', 'thesis-ai-bridge'); ?></strong></label><br><span class="description"><?php echo esc_html__('Система спочатку перевірить усі встановлені plugins. Нові plugins можуть встановлюватися тільки з вбудованого allowlist WordPress.org.', 'thesis-ai-bridge'); ?></span></p>
+                        <?php endif; ?>
+                        <p class="description"><?php echo $connected ? esc_html__('Буде виконано preflight сайту, capability resolution і 5-агентний workflow. Сторінки залишаються draft і не публікуються автоматично.', 'thesis-ai-bridge') : esc_html__('Backend ще не підключений, тому кнопка запустить локальне демо execution layer. Воно НЕ є запуском п’яти AI-агентів.', 'thesis-ai-bridge'); ?></p>
                         <?php submit_button($connected ? __('Створити сайт', 'thesis-ai-bridge') : __('Спробувати локальне демо', 'thesis-ai-bridge'), $connected ? 'primary' : 'secondary', 'submit', false); ?>
                     </form>
                 </div>
@@ -186,12 +201,14 @@ final class Thesis_AI_Bridge_Admin {
     private static function render_last_build(array $build): void {
         $pages = isset($build['pages']) && is_array($build['pages']) ? $build['pages'] : [];
         $issues = isset($build['issues']) && is_array($build['issues']) ? $build['issues'] : [];
+        $plugins = isset($build['plugins']) && is_array($build['plugins']) ? $build['plugins'] : [];
         ?>
         <div class="thesis-ai-card thesis-ai-result" style="margin-top:20px">
             <h2><?php echo esc_html__('Останній результат', 'thesis-ai-bridge'); ?></h2>
             <p><strong><?php echo esc_html__('Статус:', 'thesis-ai-bridge'); ?></strong> <?php echo esc_html((string)($build['status'] ?? 'unknown')); ?></p>
             <?php if (!empty($build['quality_summary'])) : ?><p><?php echo esc_html((string)$build['quality_summary']); ?></p><?php endif; ?>
-            <?php if ($pages) : ?><h3><?php echo esc_html__('Сторінки', 'thesis-ai-bridge'); ?></h3><ul><?php foreach ($pages as $page) : ?><li><?php echo esc_html((string)($page['title'] ?? ('Page #' . ($page['id'] ?? '')))); ?> — <?php echo esc_html((string)($page['status'] ?? 'draft')); ?><?php if (!empty($page['id'])) : ?> — <a href="<?php echo esc_url(get_edit_post_link((int)$page['id']) ?: '#'); ?>"><?php echo esc_html__('Редагувати', 'thesis-ai-bridge'); ?></a><?php endif; ?></li><?php endforeach; ?></ul><?php endif; ?>
+            <?php if ($pages) : ?><h3><?php echo esc_html__('Сторінки', 'thesis-ai-bridge'); ?></h3><ul><?php foreach ($pages as $page) : ?><li><?php echo esc_html((string)($page['title'] ?? ('Page #' . ($page['id'] ?? '')))); ?> — <?php echo esc_html((string)($page['status'] ?? 'draft')); ?><?php if (!empty($page['id'])) : ?> — <a href="<?php echo esc_url(get_edit_post_link((int)$page['id']) ?: '#'); ?>"><?php echo esc_html__('WordPress', 'thesis-ai-bridge'); ?></a><?php endif; ?><?php if (!empty($page['edit_url'])) : ?> — <a href="<?php echo esc_url((string)$page['edit_url']); ?>"><?php echo esc_html__('Elementor', 'thesis-ai-bridge'); ?></a><?php endif; ?></li><?php endforeach; ?></ul><?php endif; ?>
+            <?php if ($plugins) : ?><h3><?php echo esc_html__('Plugins', 'thesis-ai-bridge'); ?></h3><ul><?php foreach ($plugins as $plugin) : ?><li><code><?php echo esc_html((string)($plugin['slug'] ?? '')); ?></code> — <?php echo !empty($plugin['active']) ? esc_html__('active', 'thesis-ai-bridge') : esc_html__('inactive', 'thesis-ai-bridge'); ?> — <?php echo esc_html((string)($plugin['message'] ?? '')); ?></li><?php endforeach; ?></ul><?php endif; ?>
             <?php if ($issues) : ?><h3><?php echo esc_html__('Проблеми / наступні дії', 'thesis-ai-bridge'); ?></h3><ul><?php foreach ($issues as $issue) : ?><li><strong><?php echo esc_html((string)($issue['severity'] ?? '')); ?></strong>: <?php echo esc_html((string)($issue['description'] ?? '')); ?></li><?php endforeach; ?></ul><?php endif; ?>
         </div>
         <?php

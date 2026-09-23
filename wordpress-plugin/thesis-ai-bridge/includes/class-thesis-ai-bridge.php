@@ -14,6 +14,7 @@ final class Thesis_AI_Bridge {
     private const CAP_USE = 'thesis_ai_use_bridge';
 
     private const APPROVED_PLUGINS = [
+        'elementor' => 'Elementor Website Builder',
         'woocommerce' => 'WooCommerce',
         'advanced-custom-fields' => 'Advanced Custom Fields',
         'contact-form-7' => 'Contact Form 7',
@@ -274,6 +275,64 @@ final class Thesis_AI_Bridge {
                 'permission_callback' => static fn(array $input): bool => self::can_manage_plugins(),
                 'meta' => self::common_meta(false, false, true),
             ],
+            'inspect-capabilities' => [
+                'label' => __('Inspect capabilities', 'thesis-ai-bridge'),
+                'description' => __('Summarizes installed plugins, approved capabilities, Elementor availability and whether controlled plugin management is enabled.', 'thesis-ai-bridge'),
+                'category' => self::CATEGORY,
+                'output_schema' => self::schema_capability_snapshot(),
+                'execute_callback' => static fn(): array => self::execute_named_ability('inspect-capabilities', []),
+                'permission_callback' => static fn(): bool => self::can_use_bridge(),
+                'meta' => self::common_meta(true, false, true),
+            ],
+            'get-approved-plugin-info' => [
+                'label' => __('Get approved plugin info', 'thesis-ai-bridge'),
+                'description' => __('Reads WordPress.org metadata only for a plugin in the approved catalogue.', 'thesis-ai-bridge'),
+                'category' => self::CATEGORY,
+                'input_schema' => self::schema_plugin_slug_input(),
+                'output_schema' => self::schema_plugin_info_result(),
+                'execute_callback' => static fn(array $input): array|WP_Error => self::execute_named_ability('get-approved-plugin-info', $input),
+                'permission_callback' => static fn(array $input): bool => self::can_use_bridge(),
+                'meta' => self::common_meta(true, false, true),
+            ],
+            'ensure-approved-plugin' => [
+                'label' => __('Ensure approved plugin', 'thesis-ai-bridge'),
+                'description' => __('Idempotently ensures an approved WordPress.org plugin is installed and active.', 'thesis-ai-bridge'),
+                'category' => self::CATEGORY,
+                'input_schema' => self::schema_plugin_slug_input(),
+                'output_schema' => self::schema_plugin_action_result(),
+                'execute_callback' => static fn(array $input): array|WP_Error => self::execute_named_ability('ensure-approved-plugin', $input),
+                'permission_callback' => static fn(array $input): bool => self::can_manage_plugins(),
+                'meta' => self::common_meta(false, false, true),
+            ],
+            'elementor-get-status' => [
+                'label' => __('Get Elementor status', 'thesis-ai-bridge'),
+                'description' => __('Returns whether Elementor is installed/active and the detected version.', 'thesis-ai-bridge'),
+                'category' => self::CATEGORY,
+                'output_schema' => self::schema_elementor_status(),
+                'execute_callback' => static fn(): array => self::execute_named_ability('elementor-get-status', []),
+                'permission_callback' => static fn(): bool => self::can_use_bridge(),
+                'meta' => self::common_meta(true, false, true),
+            ],
+            'elementor-get-page' => [
+                'label' => __('Get Elementor page', 'thesis-ai-bridge'),
+                'description' => __('Returns the safe Elementor document structure for a page.', 'thesis-ai-bridge'),
+                'category' => self::CATEGORY,
+                'input_schema' => self::schema_page_id_input(),
+                'output_schema' => self::schema_elementor_page_result(),
+                'execute_callback' => static fn(array $input): array|WP_Error => self::execute_named_ability('elementor-get-page', $input),
+                'permission_callback' => static fn(array $input): bool => self::can_use_bridge(),
+                'meta' => self::common_meta(true, false, true),
+            ],
+            'elementor-ensure-draft-page' => [
+                'label' => __('Ensure Elementor draft page', 'thesis-ai-bridge'),
+                'description' => __('Creates or safely updates the current AI user’s Elementor draft page using a restricted Elementor component set.', 'thesis-ai-bridge'),
+                'category' => self::CATEGORY,
+                'input_schema' => self::schema_elementor_page_input(),
+                'output_schema' => self::schema_elementor_page_result(),
+                'execute_callback' => static fn(array $input): array|WP_Error => self::execute_named_ability('elementor-ensure-draft-page', $input),
+                'permission_callback' => static fn(array $input): bool => self::can_write_pages(),
+                'meta' => self::common_meta(false, false, true),
+            ],
         ];
     }
 
@@ -307,11 +366,11 @@ final class Thesis_AI_Bridge {
         $input = self::request_input($request);
 
         return match ($ability) {
-            'get-site-info', 'list-pages', 'get-page', 'list-plugins' => self::can_use_bridge(),
-            'create-draft-page', 'ensure-draft-page' => self::can_write_pages(),
+            'get-site-info', 'list-pages', 'get-page', 'list-plugins', 'inspect-capabilities', 'get-approved-plugin-info', 'elementor-get-status', 'elementor-get-page' => self::can_use_bridge(),
+            'create-draft-page', 'ensure-draft-page', 'elementor-ensure-draft-page' => self::can_write_pages(),
             'update-page' => self::can_update_page((int)($input['page_id'] ?? 0)),
             'set-homepage' => self::can_manage_site(),
-            'install-approved-plugin', 'activate-approved-plugin', 'deactivate-approved-plugin' => self::can_manage_plugins(),
+            'install-approved-plugin', 'activate-approved-plugin', 'deactivate-approved-plugin', 'ensure-approved-plugin' => self::can_manage_plugins(),
             default => new WP_Error('thesis_ai_unknown_ability', __('Unknown bridge ability.', 'thesis-ai-bridge'), ['status' => 404]),
         };
     }
@@ -356,6 +415,12 @@ final class Thesis_AI_Bridge {
             'install-approved-plugin' => self::do_install_approved_plugin($input),
             'activate-approved-plugin' => self::do_activate_approved_plugin($input),
             'deactivate-approved-plugin' => self::do_deactivate_approved_plugin($input),
+            'inspect-capabilities' => self::do_inspect_capabilities(),
+            'get-approved-plugin-info' => self::do_get_approved_plugin_info($input),
+            'ensure-approved-plugin' => self::do_ensure_approved_plugin($input),
+            'elementor-get-status' => self::do_elementor_get_status(),
+            'elementor-get-page' => self::do_elementor_get_page($input),
+            'elementor-ensure-draft-page' => self::do_elementor_ensure_draft_page($input),
             default => new WP_Error('thesis_ai_unknown_ability', __('Unknown bridge ability.', 'thesis-ai-bridge')),
         };
 
@@ -555,10 +620,13 @@ final class Thesis_AI_Bridge {
         }
         $plugins = get_plugins();
         $approved = array_keys(self::APPROVED_PLUGINS);
+        $updates = get_site_transient('update_plugins');
+        $update_response = is_object($updates) && isset($updates->response) && is_array($updates->response) ? $updates->response : [];
 
         $result = [];
         foreach ($plugins as $file => $data) {
             $slug = self::plugin_slug_from_file($file);
+            $update = $update_response[$file] ?? null;
             $result[] = [
                 'file' => (string)$file,
                 'slug' => $slug,
@@ -566,6 +634,10 @@ final class Thesis_AI_Bridge {
                 'version' => (string)($data['Version'] ?? ''),
                 'active' => is_plugin_active($file),
                 'approved' => in_array($slug, $approved, true),
+                'update_available' => is_object($update),
+                'new_version' => is_object($update) ? (string)($update->new_version ?? '') : '',
+                'requires_php' => (string)($data['RequiresPHP'] ?? ''),
+                'requires_wp' => (string)($data['RequiresWP'] ?? ''),
             ];
         }
         usort($result, static fn(array $a, array $b): int => strcasecmp($a['name'], $b['name']));
@@ -713,6 +785,332 @@ final class Thesis_AI_Bridge {
             'changed' => true,
             'message' => 'Plugin deactivated.',
         ];
+    }
+
+
+    private static function do_inspect_capabilities(): array {
+        $plugins = self::do_list_plugins();
+        $by_slug = [];
+        foreach ($plugins as $plugin) {
+            $by_slug[(string)$plugin['slug']] = $plugin;
+        }
+        $approved = [];
+        foreach (self::APPROVED_PLUGINS as $slug => $name) {
+            $state = $by_slug[$slug] ?? null;
+            $approved[$slug] = [
+                'name' => $name,
+                'installed' => is_array($state),
+                'active' => is_array($state) ? (bool)$state['active'] : false,
+                'version' => is_array($state) ? (string)$state['version'] : '',
+                'update_available' => is_array($state) ? (bool)($state['update_available'] ?? false) : false,
+            ];
+        }
+        $settings = self::get_settings();
+        return [
+            'approved_plugins' => $approved,
+            'recognized_capabilities' => [
+                'page_builder_elementor' => !empty($approved['elementor']['active']),
+                'ecommerce' => !empty($approved['woocommerce']['active']),
+                'structured_content' => !empty($approved['advanced-custom-fields']['active']),
+                'forms' => !empty($approved['contact-form-7']['active']),
+                'seo' => !empty($approved['wordpress-seo']['active']) || !empty($approved['seo-by-rank-math']['active']),
+            ],
+            'plugin_management_enabled' => !empty($settings['plugin_management_enabled']),
+            'filesystem_method' => function_exists('get_filesystem_method') ? (string)get_filesystem_method() : 'unknown',
+            'elementor' => self::do_elementor_get_status(),
+        ];
+    }
+
+    private static function do_get_approved_plugin_info(array $input): array|WP_Error {
+        $slug = sanitize_key((string)($input['plugin_slug'] ?? ''));
+        if (!isset(self::APPROVED_PLUGINS[$slug])) {
+            return new WP_Error('thesis_ai_plugin_not_approved', __('Plugin is not in the approved catalogue.', 'thesis-ai-bridge'));
+        }
+        require_once ABSPATH . 'wp-admin/includes/plugin-install.php';
+        $api = plugins_api('plugin_information', [
+            'slug' => $slug,
+            'fields' => [
+                'sections' => false,
+                'description' => false,
+                'short_description' => true,
+                'download_link' => false,
+                'icons' => false,
+                'banners' => false,
+            ],
+        ]);
+        if (is_wp_error($api)) {
+            return $api;
+        }
+        return [
+            'plugin_slug' => $slug,
+            'name' => (string)($api->name ?? self::APPROVED_PLUGINS[$slug]),
+            'version' => (string)($api->version ?? ''),
+            'requires' => (string)($api->requires ?? ''),
+            'requires_php' => (string)($api->requires_php ?? ''),
+            'tested' => (string)($api->tested ?? ''),
+            'active_installs' => (int)($api->active_installs ?? 0),
+            'rating' => (int)($api->rating ?? 0),
+        ];
+    }
+
+    private static function do_ensure_approved_plugin(array $input): array|WP_Error {
+        $slug = sanitize_key((string)($input['plugin_slug'] ?? ''));
+        if (!isset(self::APPROVED_PLUGINS[$slug])) {
+            return new WP_Error('thesis_ai_plugin_not_approved', __('Plugin is not in the approved catalogue.', 'thesis-ai-bridge'));
+        }
+        if (!self::can_manage_plugins()) {
+            return new WP_Error('thesis_ai_plugin_management_disabled', __('Plugin management is disabled.', 'thesis-ai-bridge'));
+        }
+        $plugin_file = self::find_plugin_file($slug);
+        $installed_now = false;
+        if (!$plugin_file) {
+            $install = self::do_install_approved_plugin(['plugin_slug' => $slug]);
+            if (is_wp_error($install)) {
+                return $install;
+            }
+            $installed_now = !empty($install['changed']);
+            $plugin_file = (string)($install['plugin_file'] ?? '');
+        }
+        if ($plugin_file === '') {
+            return new WP_Error('thesis_ai_plugin_file_unknown', __('Could not identify plugin file after installation.', 'thesis-ai-bridge'));
+        }
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        $activated_now = false;
+        if (!is_plugin_active($plugin_file)) {
+            $activation = self::do_activate_approved_plugin(['plugin_slug' => $slug]);
+            if (is_wp_error($activation)) {
+                return $activation;
+            }
+            $activated_now = !empty($activation['changed']);
+        }
+        return [
+            'plugin_slug' => $slug,
+            'plugin_file' => $plugin_file,
+            'installed' => true,
+            'active' => is_plugin_active($plugin_file),
+            'changed' => $installed_now || $activated_now,
+            'message' => $installed_now ? 'Plugin installed and activated.' : ($activated_now ? 'Plugin activated.' : 'Plugin already installed and active.'),
+        ];
+    }
+
+    private static function do_elementor_get_status(): array {
+        $plugin_file = self::find_plugin_file('elementor');
+        $active = false;
+        if ($plugin_file) {
+            if (!function_exists('is_plugin_active')) {
+                require_once ABSPATH . 'wp-admin/includes/plugin.php';
+            }
+            $active = is_plugin_active($plugin_file);
+        }
+        return [
+            'installed' => $plugin_file !== null,
+            'active' => $active,
+            'version' => defined('ELEMENTOR_VERSION') ? (string)ELEMENTOR_VERSION : '',
+            'runtime_loaded' => class_exists('\\Elementor\\Plugin'),
+            'plugin_file' => $plugin_file ?? '',
+        ];
+    }
+
+    private static function do_elementor_get_page(array $input): array|WP_Error {
+        $page_id = absint($input['page_id'] ?? 0);
+        $post = $page_id ? get_post($page_id) : null;
+        if (!$post || $post->post_type !== 'page') {
+            return new WP_Error('thesis_ai_page_not_found', __('Page not found.', 'thesis-ai-bridge'));
+        }
+        if (!class_exists('\\Elementor\\Plugin')) {
+            return new WP_Error('thesis_ai_elementor_unavailable', __('Elementor is not active.', 'thesis-ai-bridge'));
+        }
+        $document = \Elementor\Plugin::$instance->documents->get($page_id, false);
+        if (!$document) {
+            return new WP_Error('thesis_ai_elementor_document_missing', __('Elementor document is unavailable for this page.', 'thesis-ai-bridge'));
+        }
+        $elements = $document->get_elements_raw_data(null, false);
+        return [
+            'id' => $page_id,
+            'title' => (string)get_the_title($page_id),
+            'slug' => (string)$post->post_name,
+            'status' => (string)$post->post_status,
+            'url' => (string)get_permalink($page_id),
+            'edit_url' => (string)$document->get_edit_url(),
+            'built_with_elementor' => (bool)$document->is_built_with_elementor(),
+            'elements' => is_array($elements) ? $elements : [],
+        ];
+    }
+
+    private static function do_elementor_ensure_draft_page(array $input): array|WP_Error {
+        if (!class_exists('\\Elementor\\Plugin')) {
+            return new WP_Error('thesis_ai_elementor_unavailable', __('Elementor is not active. Ensure the approved Elementor plugin first.', 'thesis-ai-bridge'));
+        }
+        $title = sanitize_text_field((string)($input['title'] ?? ''));
+        $slug = sanitize_title((string)($input['slug'] ?? ''));
+        $elements = isset($input['elements']) && is_array($input['elements']) ? $input['elements'] : [];
+        $settings = isset($input['settings']) && is_array($input['settings']) ? $input['settings'] : [];
+        if ($title === '' || $slug === '') {
+            return new WP_Error('thesis_ai_invalid_page', __('Elementor page title and slug are required.', 'thesis-ai-bridge'));
+        }
+        $count = 0;
+        $sanitized = self::sanitize_elementor_elements($elements, 0, $count);
+        if (is_wp_error($sanitized)) {
+            return $sanitized;
+        }
+        $settings = self::sanitize_elementor_settings($settings, 'page');
+
+        $existing = get_page_by_path($slug, OBJECT, 'page');
+        if ($existing) {
+            if ((int)$existing->post_author !== get_current_user_id() || $existing->post_status !== 'draft') {
+                return new WP_Error('thesis_ai_page_conflict', __('A page with this slug already exists and is not a safe AI-owned draft.', 'thesis-ai-bridge'));
+            }
+            $page_id = (int)$existing->ID;
+            wp_update_post(['ID' => $page_id, 'post_title' => $title]);
+        } else {
+            $page_id = wp_insert_post(wp_slash([
+                'post_type' => 'page',
+                'post_status' => 'draft',
+                'post_title' => $title,
+                'post_name' => $slug,
+                'post_author' => get_current_user_id(),
+                'post_content' => '',
+            ]), true);
+            if (is_wp_error($page_id)) {
+                return $page_id;
+            }
+            $page_id = (int)$page_id;
+        }
+
+        $document = \Elementor\Plugin::$instance->documents->get($page_id, false);
+        if (!$document) {
+            return new WP_Error('thesis_ai_elementor_document_missing', __('Elementor could not create a document for the page.', 'thesis-ai-bridge'));
+        }
+        $document->set_is_built_with_elementor(true);
+        $saved = $document->save([
+            'settings' => $settings,
+            'elements' => $sanitized,
+        ]);
+        if (!$saved) {
+            return new WP_Error('thesis_ai_elementor_save_failed', __('Elementor rejected the document save.', 'thesis-ai-bridge'));
+        }
+        clean_post_cache($page_id);
+        return [
+            'id' => $page_id,
+            'title' => (string)get_the_title($page_id),
+            'slug' => (string)get_post_field('post_name', $page_id),
+            'status' => (string)get_post_status($page_id),
+            'url' => (string)get_permalink($page_id),
+            'edit_url' => (string)$document->get_edit_url(),
+            'built_with_elementor' => true,
+            'elements' => $sanitized,
+        ];
+    }
+
+    private static function sanitize_elementor_elements(array $elements, int $depth, int &$count): array|WP_Error {
+        if ($depth > 8) {
+            return new WP_Error('thesis_ai_elementor_depth', __('Elementor structure is nested too deeply.', 'thesis-ai-bridge'));
+        }
+        $clean = [];
+        $allowed_widgets = ['heading', 'text-editor', 'button', 'image', 'icon', 'spacer', 'divider'];
+        foreach ($elements as $element) {
+            if (!is_array($element)) {
+                continue;
+            }
+            $count++;
+            if ($count > 250) {
+                return new WP_Error('thesis_ai_elementor_too_large', __('Elementor page exceeds the safe element limit.', 'thesis-ai-bridge'));
+            }
+            $el_type = sanitize_key((string)($element['elType'] ?? ''));
+            if (!in_array($el_type, ['container', 'widget'], true)) {
+                return new WP_Error('thesis_ai_elementor_type', __('Unsupported Elementor element type.', 'thesis-ai-bridge'));
+            }
+            $item = [
+                'id' => self::sanitize_elementor_id((string)($element['id'] ?? '')),
+                'elType' => $el_type,
+                'isInner' => !empty($element['isInner']),
+                'settings' => self::sanitize_elementor_settings(is_array($element['settings'] ?? null) ? $element['settings'] : [], $el_type),
+                'elements' => [],
+            ];
+            if ($el_type === 'widget') {
+                $widget_type = sanitize_key((string)($element['widgetType'] ?? ''));
+                if (!in_array($widget_type, $allowed_widgets, true)) {
+                    return new WP_Error('thesis_ai_elementor_widget', sprintf(__('Unsupported Elementor widget: %s', 'thesis-ai-bridge'), $widget_type));
+                }
+                $item['widgetType'] = $widget_type;
+            }
+            $children = is_array($element['elements'] ?? null) ? $element['elements'] : [];
+            if ($children) {
+                $nested = self::sanitize_elementor_elements($children, $depth + 1, $count);
+                if (is_wp_error($nested)) {
+                    return $nested;
+                }
+                $item['elements'] = $nested;
+            }
+            $clean[] = $item;
+        }
+        return $clean;
+    }
+
+    private static function sanitize_elementor_id(string $id): string {
+        $id = strtolower(preg_replace('/[^a-f0-9]/i', '', $id) ?? '');
+        if (strlen($id) < 6 || strlen($id) > 12) {
+            return substr(md5(wp_generate_uuid4()), 0, 8);
+        }
+        return $id;
+    }
+
+    private static function sanitize_elementor_settings(array $settings, string $scope): array {
+        $allowed = [
+            'title', 'header_size', 'editor', 'text', 'link', 'selected_icon', 'image', 'image_size', 'size', 'align',
+            'content_width', 'flex_direction', 'flex_wrap', 'justify_content', 'align_items', 'gap', 'padding', 'margin',
+            'min_height', 'background_background', 'background_color', 'text_color', 'title_color', 'primary_color',
+            'secondary_color', 'border_radius', 'space', 'weight', 'style', 'width', 'css_classes', 'html_tag', 'hide_title',
+        ];
+        $clean = [];
+        foreach ($settings as $key => $value) {
+            $key = sanitize_key((string)$key);
+            if (!in_array($key, $allowed, true)) {
+                continue;
+            }
+            if (in_array($key, ['title', 'editor', 'text'], true)) {
+                $clean[$key] = wp_kses_post((string)$value);
+            } elseif ($key === 'link' && is_array($value)) {
+                $clean[$key] = [
+                    'url' => esc_url_raw((string)($value['url'] ?? '')),
+                    'is_external' => !empty($value['is_external']) ? 'on' : '',
+                    'nofollow' => !empty($value['nofollow']) ? 'on' : '',
+                ];
+            } elseif ($key === 'image' && is_array($value)) {
+                $clean[$key] = [
+                    'id' => absint($value['id'] ?? 0),
+                    'url' => esc_url_raw((string)($value['url'] ?? '')),
+                ];
+            } elseif (in_array($key, ['background_color', 'text_color', 'title_color', 'primary_color', 'secondary_color'], true)) {
+                $color = sanitize_hex_color((string)$value);
+                if ($color) {
+                    $clean[$key] = $color;
+                }
+            } elseif ($key === 'css_classes') {
+                $classes = preg_split('/\s+/', (string)$value) ?: [];
+                $clean[$key] = implode(' ', array_filter(array_map('sanitize_html_class', $classes)));
+            } elseif (is_array($value)) {
+                $clean[$key] = self::sanitize_elementor_scalar_array($value);
+            } else {
+                $clean[$key] = sanitize_text_field((string)$value);
+            }
+        }
+        return $clean;
+    }
+
+    private static function sanitize_elementor_scalar_array(array $value): array {
+        $clean = [];
+        foreach ($value as $key => $item) {
+            $safe_key = is_int($key) ? $key : sanitize_key((string)$key);
+            if (is_array($item)) {
+                $clean[$safe_key] = self::sanitize_elementor_scalar_array($item);
+            } elseif (is_bool($item) || is_int($item) || is_float($item)) {
+                $clean[$safe_key] = $item;
+            } else {
+                $clean[$safe_key] = sanitize_text_field((string)$item);
+            }
+        }
+        return $clean;
     }
 
     private static function sanitize_block_content(string $content): string {
@@ -989,11 +1387,46 @@ final class Thesis_AI_Bridge {
                     'version' => ['type' => 'string'],
                     'active' => ['type' => 'boolean'],
                     'approved' => ['type' => 'boolean'],
+                    'update_available' => ['type' => 'boolean'],
+                    'new_version' => ['type' => 'string'],
+                    'requires_php' => ['type' => 'string'],
+                    'requires_wp' => ['type' => 'string'],
                 ],
-                'required' => ['file', 'slug', 'name', 'version', 'active', 'approved'],
+                'required' => ['file', 'slug', 'name', 'version', 'active', 'approved', 'update_available', 'new_version', 'requires_php', 'requires_wp'],
                 'additionalProperties' => false,
             ],
         ];
+    }
+
+
+    private static function schema_capability_snapshot(): array {
+        return ['type' => 'object', 'additionalProperties' => true];
+    }
+
+    private static function schema_plugin_info_result(): array {
+        return ['type' => 'object', 'additionalProperties' => true];
+    }
+
+    private static function schema_elementor_status(): array {
+        return ['type' => 'object', 'additionalProperties' => true];
+    }
+
+    private static function schema_elementor_page_input(): array {
+        return [
+            'type' => 'object',
+            'properties' => [
+                'title' => ['type' => 'string', 'minLength' => 1, 'maxLength' => 200],
+                'slug' => ['type' => 'string', 'minLength' => 1, 'maxLength' => 200],
+                'elements' => ['type' => 'array'],
+                'settings' => ['type' => 'object'],
+            ],
+            'required' => ['title', 'slug', 'elements'],
+            'additionalProperties' => false,
+        ];
+    }
+
+    private static function schema_elementor_page_result(): array {
+        return ['type' => 'object', 'additionalProperties' => true];
     }
 
     private static function schema_plugin_action_result(): array {

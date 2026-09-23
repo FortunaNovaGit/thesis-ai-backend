@@ -9,7 +9,7 @@ def test_site_store_encrypts_password_and_authenticates(tmp_path: Path):
         site_url="https://example.com",
         username="thesis_ai_builder",
         application_password="plain-secret-password",
-        bridge_version="0.3.0",
+        bridge_version="0.4.0",
         site_name="Example",
     )
 

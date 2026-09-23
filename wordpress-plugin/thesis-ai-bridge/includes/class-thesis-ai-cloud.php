@@ -165,6 +165,7 @@ final class Thesis_AI_Cloud {
     }
 
     public static function check_connection(): array|WP_Error {
+        $renderer = in_array($renderer, ['elementor', 'gutenberg', 'auto'], true) ? $renderer : 'elementor';
         $c = self::full_connection();
         if (!self::is_connected()) {
             return new WP_Error('thesis_ai_not_connected', __('AI Builder is not connected.', 'thesis-ai-bridge'));
@@ -192,7 +193,7 @@ final class Thesis_AI_Cloud {
         return $body;
     }
 
-    public static function build(string $prompt): array|WP_Error {
+    public static function build(string $prompt, string $renderer = 'elementor'): array|WP_Error {
         $prompt = trim(wp_strip_all_tags($prompt));
         if (self::string_length($prompt) < 10) {
             return new WP_Error('thesis_ai_prompt_short', __('Please describe the website in a little more detail.', 'thesis-ai-bridge'));
@@ -215,7 +216,7 @@ final class Thesis_AI_Cloud {
                     'Accept' => 'application/json',
                     'User-Agent' => 'Thesis-AI-Bridge/' . THESIS_AI_BRIDGE_VERSION,
                 ],
-                'body' => wp_json_encode(['request' => $prompt]),
+                'body' => wp_json_encode(['request' => $prompt, 'renderer' => $renderer]),
             ]
         );
         if (is_wp_error($response)) {
@@ -289,7 +290,7 @@ final class Thesis_AI_Cloud {
     }
 
     private static function encrypt_secret(string $plain): string|WP_Error {
-        $key = hash('sha256', wp_salt('auth') . '|thesis-ai-bridge-v0.3', true);
+        $key = hash('sha256', wp_salt('auth') . '|thesis-ai-bridge-v0.4', true);
         if (function_exists('sodium_crypto_secretbox')) {
             $nonce = random_bytes(SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
             $cipher = sodium_crypto_secretbox($plain, $nonce, $key);
@@ -308,7 +309,7 @@ final class Thesis_AI_Cloud {
     }
 
     private static function decrypt_secret(string $sealed): string|WP_Error {
-        $key = hash('sha256', wp_salt('auth') . '|thesis-ai-bridge-v0.3', true);
+        $key = hash('sha256', wp_salt('auth') . '|thesis-ai-bridge-v0.4', true);
         if (str_starts_with($sealed, 'sodium:') && function_exists('sodium_crypto_secretbox_open')) {
             $raw = base64_decode(substr($sealed, 7), true);
             if ($raw === false || strlen($raw) <= SODIUM_CRYPTO_SECRETBOX_NONCEBYTES) {
