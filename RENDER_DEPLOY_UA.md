@@ -29,3 +29,7 @@ Expected JSON:
 
 ## Important limitation
 This test build stores connected-site state on Render's local filesystem. Free Render web services do not provide a persistent disk. A redeploy/restart can therefore require reconnecting the WordPress plugin. This is acceptable for the first end-to-end test; the next version should move site state to PostgreSQL or another persistent store.
+
+
+## v0.3.2
+Backend HTTP client now follows safe canonical redirects (for example EasyWP adding a trailing slash to REST routes).

@@ -211,7 +211,8 @@ class RemoteWordPressExecutor(WordPressExecutor):
             auth=self.auth,
             timeout=self.timeout,
             verify=self.verify,
-            headers={"User-Agent": "Thesis-AI-Backend/0.3"},
+            headers={"User-Agent": "Thesis-AI-Backend/0.3.2"},
+            follow_redirects=True,
         )
 
     async def probe(self) -> dict[str, Any]:
