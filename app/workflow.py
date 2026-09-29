@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import uuid
 from pathlib import Path
+from typing import Awaitable, Callable
 
 from .agents.runtime import AgentRuntime
 from .config import Settings
@@ -12,14 +14,25 @@ from .policy import PolicyEngine
 from .tools.wordpress import WordPressExecutor
 
 
+ProgressCallback = Callable[[str, int, str], Awaitable[None] | None]
+
+
 class MultiAgentWorkflow:
-    def __init__(self, settings: Settings, agents: AgentRuntime, wordpress: WordPressExecutor, run_dir: Path | None = None) -> None:
+    def __init__(self, settings: Settings, agents: AgentRuntime, wordpress: WordPressExecutor, run_dir: Path | None = None, progress_callback: ProgressCallback | None = None) -> None:
         self.settings = settings
         self.agents = agents
         self.wordpress = wordpress
         self.policy = PolicyEngine()
         self.run_dir = run_dir or Path("runs")
         self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.progress_callback = progress_callback
+
+    async def _progress(self, stage: str, progress: int, detail: str = "") -> None:
+        if not self.progress_callback:
+            return
+        result = self.progress_callback(stage, max(0, min(100, int(progress))), detail)
+        if inspect.isawaitable(result):
+            await result
 
     def _save(self, run: ProjectRun) -> None:
         (self.run_dir / f"{run.run_id}.json").write_text(run.model_dump_json(indent=2), encoding="utf-8")
@@ -78,23 +91,33 @@ class MultiAgentWorkflow:
     async def run(self, user_request: str, renderer: Renderer = "elementor") -> ProjectRun:
         run = ProjectRun(run_id=str(uuid.uuid4()), user_request=user_request, renderer=renderer)
         self._save(run)
+        await self._progress("starting", 2, "Build accepted by the orchestration service")
 
+        await self._progress("planning", 6, "Orchestrator is creating the task plan")
         run.task_plan = await self.agents.plan(user_request)
         run.status = "planned"
         self._save(run)
 
+        await self._progress("preflight", 14, "Inspecting the current WordPress site")
         run.site_snapshot = await self._inspect_site(run, AgentRole.ARCHITECT)
         run.status = "inspected"
         self._save(run)
 
+        await self._progress("architecture", 26, "Architect & Capability agent is resolving requirements")
         run.application_spec = await self.agents.architect(user_request, run.task_plan, run.site_snapshot, renderer)
+
+        await self._progress("design", 38, "Design / Content / SEO agent is preparing the experience specification")
         run.experience_spec = await self.agents.design(run.application_spec, renderer)
         run.status = "specified"
         self._save(run)
 
+        await self._progress("build_plan", 48, "Implementation agent is compiling the build plan")
         run.build_plan = await self.agents.build(run.application_spec, run.experience_spec, run.site_snapshot, renderer)
         has_pending_approval = False
-        for action in run.build_plan.actions:
+        total_actions = max(1, len(run.build_plan.actions))
+        for index, action in enumerate(run.build_plan.actions, start=1):
+            pct = 50 + int((index - 1) / total_actions * 25)
+            await self._progress("building", pct, f"Executing {action.ability} ({index}/{total_actions})")
             execution = await self._execute_action(run, action, AgentRole.BUILDER)
             if execution.policy.outcome == PolicyOutcome.REQUIRE_APPROVAL:
                 has_pending_approval = True
@@ -102,7 +125,9 @@ class MultiAgentWorkflow:
         run.status = "built"
         self._save(run)
 
+        await self._progress("verification", 78, "Inspecting the site after the build")
         run.verification_snapshot = await self._inspect_site(run, AgentRole.QUALITY)
+        await self._progress("quality", 86, "Quality & Security agent is evaluating the result")
         report = await self.agents.quality(
             run.application_spec,
             run.experience_spec,
@@ -119,6 +144,7 @@ class MultiAgentWorkflow:
             repair_loop += 1
             run.repair_attempts = repair_loop
             run.status = "repairing"
+            await self._progress("repair", min(94, 88 + repair_loop * 3), f"Repair loop {repair_loop} is preparing corrective actions")
             repair_plan = await self.agents.repair(
                 run.application_spec,
                 run.experience_spec,
@@ -155,4 +181,5 @@ class MultiAgentWorkflow:
             run.status = "failed"
         run.usage = self.agents.usage
         self._save(run)
+        await self._progress("completed", 100, f"Build finished with status: {run.status}")
         return run

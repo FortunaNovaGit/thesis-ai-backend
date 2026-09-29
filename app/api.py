@@ -3,8 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+from datetime import datetime, timezone
+import asyncio
 import ipaddress
 import socket
+import uuid
 
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -16,8 +19,24 @@ from .tools.wordpress import RemoteWordPressExecutor, make_wordpress_executor
 from .workflow import MultiAgentWorkflow
 
 
-app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.5.0")
+app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.5.1")
 codec = ConnectionTokenCodec(settings.backend_token_secret, Path(settings.backend_key_file))
+
+# v0.5.1 test queue: long builds run outside the request that starts them.
+# This avoids WordPress/hosting gateway timeouts while keeping the current
+# single Render web service architecture. PostgreSQL/Redis durability can be
+# added later without changing the WordPress-facing API.
+_build_jobs: dict[str, dict[str, Any]] = {}
+_build_tasks: dict[str, asyncio.Task[Any]] = {}
+_active_job_by_site: dict[str, str] = {}
+
+
+def _utcnow() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _public_job(job: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in job.items() if key not in {"site_id"}}
 
 
 class BuildRequest(BaseModel):
@@ -143,7 +162,7 @@ def _result_summary(run) -> dict[str, Any]:
 async def health() -> dict[str, Any]:
     return {
         "status": "ok",
-        "version": "0.5.0",
+        "version": "0.5.1",
         "agent_mode": settings.resolved_agent_mode,
         "configured_agent_mode": settings.agent_mode,
         "model": settings.openai_model if settings.resolved_agent_mode == "openai" else "mock",
@@ -169,6 +188,98 @@ async def check_site(site_id: str, authorization: str | None = Header(default=No
     executor = RemoteWordPressExecutor.from_credentials(site_url=creds.site_url, username=creds.username, application_password=creds.application_password, mode="bridge_rest", verify_ssl=True, timeout=settings.wordpress_timeout_seconds)
     return {"connected": True, "bridge": await executor.probe(), "agent_mode": settings.resolved_agent_mode, "stable_connection_tokens": codec.persistent}
 
+
+
+
+async def _run_build_job(job_id: str, site_id: str, creds, payload: BuildRequest) -> None:
+    job = _build_jobs[job_id]
+    job.update({"status": "running", "stage": "starting", "progress": 1, "started_at": _utcnow()})
+
+    async def progress(stage: str, pct: int, detail: str) -> None:
+        current = _build_jobs.get(job_id)
+        if not current:
+            return
+        current.update({"stage": stage, "progress": pct, "detail": detail, "updated_at": _utcnow()})
+
+    wordpress = RemoteWordPressExecutor.from_credentials(
+        site_url=creds.site_url,
+        username=creds.username,
+        application_password=creds.application_password,
+        mode="bridge_rest",
+        verify_ssl=True,
+        timeout=settings.wordpress_timeout_seconds,
+    )
+    workflow = MultiAgentWorkflow(
+        settings,
+        make_agent_runtime(settings.resolved_agent_mode, settings.openai_model),
+        wordpress,
+        progress_callback=progress,
+    )
+    try:
+        run = await workflow.run(payload.request, payload.renderer)
+        job.update({
+            "status": "completed",
+            "stage": "completed",
+            "progress": 100,
+            "detail": f"Build finished with status: {run.status}",
+            "result": _result_summary(run),
+            "finished_at": _utcnow(),
+            "updated_at": _utcnow(),
+        })
+    except Exception as exc:
+        job.update({
+            "status": "failed",
+            "stage": "failed",
+            "detail": str(exc),
+            "error": str(exc),
+            "finished_at": _utcnow(),
+            "updated_at": _utcnow(),
+        })
+    finally:
+        if _active_job_by_site.get(site_id) == job_id:
+            _active_job_by_site.pop(site_id, None)
+        _build_tasks.pop(job_id, None)
+
+
+@app.post("/v1/sites/{site_id}/builds", status_code=202)
+async def start_connected_site_build(site_id: str, payload: BuildRequest, authorization: str | None = Header(default=None)):
+    creds = _credentials(site_id, authorization)
+
+    existing_id = _active_job_by_site.get(site_id)
+    if existing_id:
+        existing = _build_jobs.get(existing_id)
+        if existing and existing.get("status") in {"queued", "running"}:
+            response = _public_job(existing)
+            response["reused"] = True
+            return response
+
+    job_id = str(uuid.uuid4())
+    job = {
+        "job_id": job_id,
+        "site_id": site_id,
+        "status": "queued",
+        "stage": "queued",
+        "progress": 0,
+        "detail": "Build queued",
+        "created_at": _utcnow(),
+        "updated_at": _utcnow(),
+        "result": None,
+        "error": None,
+    }
+    _build_jobs[job_id] = job
+    _active_job_by_site[site_id] = job_id
+    task = asyncio.create_task(_run_build_job(job_id, site_id, creds, payload))
+    _build_tasks[job_id] = task
+    return _public_job(job)
+
+
+@app.get("/v1/sites/{site_id}/builds/{job_id}")
+async def get_connected_site_build(site_id: str, job_id: str, authorization: str | None = Header(default=None)):
+    _credentials(site_id, authorization)
+    job = _build_jobs.get(job_id)
+    if not job or job.get("site_id") != site_id:
+        raise HTTPException(status_code=404, detail="Build job not found")
+    return _public_job(job)
 
 @app.post("/v1/sites/{site_id}/build")
 async def build_connected_site(site_id: str, payload: BuildRequest, authorization: str | None = Header(default=None)):
