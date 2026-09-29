@@ -165,7 +165,6 @@ final class Thesis_AI_Cloud {
     }
 
     public static function check_connection(): array|WP_Error {
-        $renderer = in_array($renderer, ['elementor', 'gutenberg', 'auto'], true) ? $renderer : 'elementor';
         $c = self::full_connection();
         if (!self::is_connected()) {
             return new WP_Error('thesis_ai_not_connected', __('AI Builder is not connected.', 'thesis-ai-bridge'));
@@ -209,7 +208,7 @@ final class Thesis_AI_Cloud {
         $response = wp_remote_post(
             untrailingslashit((string)$c['backend_url']) . '/v1/sites/' . rawurlencode((string)$c['site_id']) . '/build',
             [
-                'timeout' => 120,
+                'timeout' => 300,
                 'headers' => [
                     'Authorization' => 'Bearer ' . (string)$c['site_token'],
                     'Content-Type' => 'application/json',
@@ -231,6 +230,61 @@ final class Thesis_AI_Cloud {
         $body['requested_at'] = gmdate('c');
         update_option(self::OPTION_LAST_BUILD, $body, false);
         return $body;
+    }
+
+    public static function publish_last_build(): array|WP_Error {
+        if (!current_user_can('manage_options')) {
+            return new WP_Error('thesis_ai_forbidden', __('Administrator permissions are required.', 'thesis-ai-bridge'));
+        }
+        $build = self::last_build();
+        if (($build['status'] ?? '') !== 'passed') {
+            return new WP_Error('thesis_ai_publish_not_ready', __('Only a build that passed the current structural QA can be published from this screen.', 'thesis-ai-bridge'));
+        }
+        $connection = self::connection();
+        $service_user_id = (int)($connection['service_user_id'] ?? 0);
+        $pages = isset($build['pages']) && is_array($build['pages']) ? $build['pages'] : [];
+        if (!$pages) {
+            return new WP_Error('thesis_ai_publish_no_pages', __('The last build does not contain generated pages.', 'thesis-ai-bridge'));
+        }
+
+        $published = [];
+        foreach ($pages as &$page_summary) {
+            $page_id = (int)($page_summary['id'] ?? 0);
+            $post = $page_id > 0 ? get_post($page_id) : null;
+            if (!$post instanceof WP_Post || $post->post_type !== 'page') {
+                continue;
+            }
+            // Human approval may publish only pages produced by the dedicated AI service user.
+            if ($service_user_id > 0 && (int)$post->post_author !== $service_user_id) {
+                continue;
+            }
+            if ($post->post_status === 'publish') {
+                $published[] = $page_id;
+                $page_summary['status'] = 'publish';
+                $page_summary['url'] = get_permalink($page_id) ?: ($page_summary['url'] ?? '');
+                continue;
+            }
+            if (!in_array($post->post_status, ['draft', 'pending'], true)) {
+                continue;
+            }
+            $updated = wp_update_post(['ID' => $page_id, 'post_status' => 'publish'], true);
+            if (is_wp_error($updated)) {
+                return $updated;
+            }
+            $published[] = $page_id;
+            $page_summary['status'] = 'publish';
+            $page_summary['url'] = get_permalink($page_id) ?: ($page_summary['url'] ?? '');
+        }
+        unset($page_summary);
+
+        if (!$published) {
+            return new WP_Error('thesis_ai_publish_none', __('No AI-owned draft pages were eligible for publishing.', 'thesis-ai-bridge'));
+        }
+        $build['pages'] = $pages;
+        $build['published_at'] = gmdate('c');
+        $build['published_page_ids'] = $published;
+        update_option(self::OPTION_LAST_BUILD, $build, false);
+        return ['published' => true, 'page_ids' => $published, 'count' => count($published)];
     }
 
     public static function demo_build(string $prompt): array|WP_Error {

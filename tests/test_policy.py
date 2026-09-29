@@ -52,3 +52,29 @@ def test_approved_plugin_is_medium_risk():
     )
     assert decision.outcome == PolicyOutcome.REQUIRE_APPROVAL
     assert decision.risk == RiskLevel.MEDIUM
+
+
+def test_approved_theme_is_medium_risk():
+    decision = PolicyEngine().evaluate(
+        AgentRole.BUILDER,
+        BuildAction(
+            ability="thesis-ai-bridge/ensure-approved-theme",
+            parameters={"theme_slug": "hello-elementor"},
+            rationale="test",
+        ),
+        auto_approve_medium=False,
+    )
+    assert decision.outcome == PolicyOutcome.REQUIRE_APPROVAL
+    assert decision.risk == RiskLevel.MEDIUM
+
+
+def test_unapproved_theme_is_blocked():
+    decision = PolicyEngine().evaluate(
+        AgentRole.BUILDER,
+        BuildAction(
+            ability="thesis-ai-bridge/ensure-approved-theme",
+            parameters={"theme_slug": "random-theme"},
+            rationale="test",
+        ),
+    )
+    assert decision.outcome == PolicyOutcome.BLOCK

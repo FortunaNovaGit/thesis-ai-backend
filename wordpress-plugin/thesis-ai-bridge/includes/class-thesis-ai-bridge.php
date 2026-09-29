@@ -26,10 +26,42 @@ final class Thesis_AI_Bridge {
         add_action('init', [self::class, 'ensure_role']);
         add_action('init', [self::class, 'ensure_admin_capability']);
         add_action('rest_api_init', [self::class, 'register_fallback_rest_routes']);
+        // Lightweight SEO fallback for sites without a dedicated supported SEO plugin.
+        // If Yoast or Rank Math is active, their own output takes precedence.
+        add_filter('document_title_parts', [self::class, 'filter_document_title_parts']);
+        add_action('wp_head', [self::class, 'output_meta_description'], 1);
 
         // These hooks exist only when the native Abilities API is available (WordPress 6.9+).
         add_action('wp_abilities_api_categories_init', [self::class, 'register_category']);
         add_action('wp_abilities_api_init', [self::class, 'register_abilities']);
+    }
+
+    private static function supported_seo_plugin_active(): bool {
+        return defined('WPSEO_VERSION') || defined('RANK_MATH_VERSION');
+    }
+
+    public static function filter_document_title_parts(array $parts): array {
+        if (self::supported_seo_plugin_active() || !is_singular('page')) {
+            return $parts;
+        }
+        $post_id = get_queried_object_id();
+        $title = $post_id ? trim((string)get_post_meta($post_id, '_thesis_ai_seo_title', true)) : '';
+        if ($title !== '') {
+            // A generated SEO title is already complete, so use it as the document title.
+            return ['title' => $title];
+        }
+        return $parts;
+    }
+
+    public static function output_meta_description(): void {
+        if (self::supported_seo_plugin_active() || !is_singular('page')) {
+            return;
+        }
+        $post_id = get_queried_object_id();
+        $description = $post_id ? trim((string)get_post_meta($post_id, '_thesis_ai_meta_description', true)) : '';
+        if ($description !== '') {
+            echo '<meta name="description" content="' . esc_attr($description) . '">' . "\n";
+        }
     }
 
     public static function activate(): void {
@@ -333,6 +365,84 @@ final class Thesis_AI_Bridge {
                 'permission_callback' => static fn(array $input): bool => self::can_write_pages(),
                 'meta' => self::common_meta(false, false, true),
             ],
+            'list-themes' => [
+                'label' => __('List themes', 'thesis-ai-bridge'),
+                'description' => __('Lists installed themes and active/approved state.', 'thesis-ai-bridge'),
+                'category' => self::CATEGORY,
+                'output_schema' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
+                'execute_callback' => static fn(): array => self::execute_named_ability('list-themes', []),
+                'permission_callback' => static fn(): bool => self::can_use_bridge(),
+                'meta' => self::common_meta(true, false, true),
+            ],
+            'get-site-structure' => [
+                'label' => __('Get site structure', 'thesis-ai-bridge'),
+                'description' => __('Returns site identity, homepage, menus and active theme.', 'thesis-ai-bridge'),
+                'category' => self::CATEGORY,
+                'output_schema' => ['type' => 'object', 'additionalProperties' => true],
+                'execute_callback' => static fn(): array => self::execute_named_ability('get-site-structure', []),
+                'permission_callback' => static fn(): bool => self::can_use_bridge(),
+                'meta' => self::common_meta(true, false, true),
+            ],
+            'ensure-approved-theme' => [
+                'label' => __('Ensure approved theme', 'thesis-ai-bridge'),
+                'description' => __('Installs/activates an approved WordPress.org theme.', 'thesis-ai-bridge'),
+                'category' => self::CATEGORY,
+                'input_schema' => ['type' => 'object', 'properties' => ['theme_slug' => ['type' => 'string']], 'required' => ['theme_slug'], 'additionalProperties' => false],
+                'output_schema' => ['type' => 'object', 'additionalProperties' => true],
+                'execute_callback' => static fn(array $input): array|WP_Error => self::execute_named_ability('ensure-approved-theme', $input),
+                'permission_callback' => static fn(array $input): bool => self::can_manage_plugins() && self::can_manage_site(),
+                'meta' => self::common_meta(false, false, true),
+            ],
+            'update-site-identity' => [
+                'label' => __('Update site identity', 'thesis-ai-bridge'),
+                'description' => __('Updates site title and tagline.', 'thesis-ai-bridge'),
+                'category' => self::CATEGORY,
+                'input_schema' => ['type' => 'object', 'properties' => ['site_title' => ['type' => 'string'], 'tagline' => ['type' => 'string']], 'required' => ['site_title'], 'additionalProperties' => false],
+                'output_schema' => ['type' => 'object', 'additionalProperties' => true],
+                'execute_callback' => static fn(array $input): array|WP_Error => self::execute_named_ability('update-site-identity', $input),
+                'permission_callback' => static fn(array $input): bool => self::can_manage_site(),
+                'meta' => self::common_meta(false, false, true),
+            ],
+            'set-homepage-by-slug' => [
+                'label' => __('Set homepage by slug', 'thesis-ai-bridge'),
+                'description' => __('Configures an existing page as the static homepage by slug.', 'thesis-ai-bridge'),
+                'category' => self::CATEGORY,
+                'input_schema' => ['type' => 'object', 'properties' => ['slug' => ['type' => 'string']], 'required' => ['slug'], 'additionalProperties' => false],
+                'output_schema' => ['type' => 'object', 'additionalProperties' => true],
+                'execute_callback' => static fn(array $input): array|WP_Error => self::execute_named_ability('set-homepage-by-slug', $input),
+                'permission_callback' => static fn(array $input): bool => self::can_manage_site(),
+                'meta' => self::common_meta(false, false, true),
+            ],
+            'ensure-navigation-menu' => [
+                'label' => __('Ensure navigation menu', 'thesis-ai-bridge'),
+                'description' => __('Creates/updates a controlled primary menu from page slugs.', 'thesis-ai-bridge'),
+                'category' => self::CATEGORY,
+                'input_schema' => ['type' => 'object', 'properties' => ['menu_name' => ['type' => 'string'], 'page_slugs' => ['type' => 'array', 'items' => ['type' => 'string']], 'assign_primary' => ['type' => 'boolean']], 'required' => ['menu_name', 'page_slugs'], 'additionalProperties' => false],
+                'output_schema' => ['type' => 'object', 'additionalProperties' => true],
+                'execute_callback' => static fn(array $input): array|WP_Error => self::execute_named_ability('ensure-navigation-menu', $input),
+                'permission_callback' => static fn(array $input): bool => self::can_manage_site(),
+                'meta' => self::common_meta(false, false, true),
+            ],
+            'set-page-seo' => [
+                'label' => __('Set page SEO metadata', 'thesis-ai-bridge'),
+                'description' => __('Stores controlled SEO title/description and maps them to supported SEO plugins when active.', 'thesis-ai-bridge'),
+                'category' => self::CATEGORY,
+                'input_schema' => ['type' => 'object', 'properties' => ['slug' => ['type' => 'string'], 'seo_title' => ['type' => 'string'], 'meta_description' => ['type' => 'string']], 'required' => ['slug', 'seo_title', 'meta_description'], 'additionalProperties' => false],
+                'output_schema' => ['type' => 'object', 'additionalProperties' => true],
+                'execute_callback' => static fn(array $input): array|WP_Error => self::execute_named_ability('set-page-seo', $input),
+                'permission_callback' => static fn(array $input): bool => self::can_manage_site(),
+                'meta' => self::common_meta(false, false, true),
+            ],
+            'ensure-contact-form' => [
+                'label' => __('Ensure contact form', 'thesis-ai-bridge'),
+                'description' => __('Creates an idempotent Contact Form 7 form after the approved plugin is active.', 'thesis-ai-bridge'),
+                'category' => self::CATEGORY,
+                'input_schema' => ['type' => 'object', 'properties' => ['title' => ['type' => 'string']], 'required' => ['title'], 'additionalProperties' => false],
+                'output_schema' => ['type' => 'object', 'additionalProperties' => true],
+                'execute_callback' => static fn(array $input): array|WP_Error => self::execute_named_ability('ensure-contact-form', $input),
+                'permission_callback' => static fn(array $input): bool => self::can_manage_plugins(),
+                'meta' => self::common_meta(false, false, true),
+            ],
         ];
     }
 
@@ -366,11 +476,12 @@ final class Thesis_AI_Bridge {
         $input = self::request_input($request);
 
         return match ($ability) {
-            'get-site-info', 'list-pages', 'get-page', 'list-plugins', 'inspect-capabilities', 'get-approved-plugin-info', 'elementor-get-status', 'elementor-get-page' => self::can_use_bridge(),
+            'get-site-info', 'list-pages', 'get-page', 'list-plugins', 'list-themes', 'inspect-capabilities', 'get-approved-plugin-info', 'elementor-get-status', 'elementor-get-page', 'get-site-structure' => self::can_use_bridge(),
             'create-draft-page', 'ensure-draft-page', 'elementor-ensure-draft-page' => self::can_write_pages(),
             'update-page' => self::can_update_page((int)($input['page_id'] ?? 0)),
-            'set-homepage' => self::can_manage_site(),
-            'install-approved-plugin', 'activate-approved-plugin', 'deactivate-approved-plugin', 'ensure-approved-plugin' => self::can_manage_plugins(),
+            'set-homepage', 'set-homepage-by-slug', 'update-site-identity', 'ensure-navigation-menu', 'set-page-seo' => self::can_manage_site(),
+            'install-approved-plugin', 'activate-approved-plugin', 'deactivate-approved-plugin', 'ensure-approved-plugin', 'ensure-contact-form' => self::can_manage_plugins(),
+            'ensure-approved-theme' => self::can_manage_plugins() && self::can_manage_site(),
             default => new WP_Error('thesis_ai_unknown_ability', __('Unknown bridge ability.', 'thesis-ai-bridge'), ['status' => 404]),
         };
     }
@@ -411,13 +522,21 @@ final class Thesis_AI_Bridge {
             'ensure-draft-page' => self::do_ensure_draft_page($input),
             'update-page' => self::do_update_page($input),
             'set-homepage' => self::do_set_homepage($input),
+            'set-homepage-by-slug' => Thesis_AI_Site_Setup::set_homepage_by_slug($input),
+            'update-site-identity' => Thesis_AI_Site_Setup::update_site_identity($input),
+            'ensure-navigation-menu' => Thesis_AI_Site_Setup::ensure_navigation_menu($input),
+            'set-page-seo' => Thesis_AI_Site_Setup::set_page_seo($input),
             'list-plugins' => self::do_list_plugins(),
+            'list-themes' => Thesis_AI_Site_Setup::list_themes(),
             'install-approved-plugin' => self::do_install_approved_plugin($input),
             'activate-approved-plugin' => self::do_activate_approved_plugin($input),
             'deactivate-approved-plugin' => self::do_deactivate_approved_plugin($input),
             'inspect-capabilities' => self::do_inspect_capabilities(),
             'get-approved-plugin-info' => self::do_get_approved_plugin_info($input),
             'ensure-approved-plugin' => self::do_ensure_approved_plugin($input),
+            'ensure-approved-theme' => Thesis_AI_Site_Setup::ensure_approved_theme($input),
+            'ensure-contact-form' => Thesis_AI_Site_Setup::ensure_contact_form($input),
+            'get-site-structure' => Thesis_AI_Site_Setup::get_site_structure(),
             'elementor-get-status' => self::do_elementor_get_status(),
             'elementor-get-page' => self::do_elementor_get_page($input),
             'elementor-ensure-draft-page' => self::do_elementor_ensure_draft_page($input),
@@ -436,10 +555,12 @@ final class Thesis_AI_Bridge {
         $theme = wp_get_theme();
         return [
             'name' => (string)get_bloginfo('name'),
+            'tagline' => (string)get_bloginfo('description'),
             'url' => (string)home_url('/'),
             'wordpress_version' => (string)get_bloginfo('version'),
             'php_version' => (string)PHP_VERSION,
             'theme' => (string)$theme->get('Name'),
+            'theme_slug' => (string)get_stylesheet(),
             'theme_version' => (string)$theme->get('Version'),
             'is_block_theme' => function_exists('wp_is_block_theme') ? (bool)wp_is_block_theme() : false,
             'permalink_structure' => (string)get_option('permalink_structure', ''),
@@ -1007,7 +1128,7 @@ final class Thesis_AI_Bridge {
             return new WP_Error('thesis_ai_elementor_depth', __('Elementor structure is nested too deeply.', 'thesis-ai-bridge'));
         }
         $clean = [];
-        $allowed_widgets = ['heading', 'text-editor', 'button', 'image', 'icon', 'spacer', 'divider'];
+        $allowed_widgets = ['heading', 'text-editor', 'button', 'image', 'icon', 'spacer', 'divider', 'shortcode'];
         foreach ($elements as $element) {
             if (!is_array($element)) {
                 continue;
@@ -1060,7 +1181,9 @@ final class Thesis_AI_Bridge {
             'title', 'header_size', 'editor', 'text', 'link', 'selected_icon', 'image', 'image_size', 'size', 'align',
             'content_width', 'flex_direction', 'flex_wrap', 'justify_content', 'align_items', 'gap', 'padding', 'margin',
             'min_height', 'background_background', 'background_color', 'text_color', 'title_color', 'primary_color',
-            'secondary_color', 'border_radius', 'space', 'weight', 'style', 'width', 'css_classes', 'html_tag', 'hide_title',
+            'secondary_color', 'border_radius', 'space', 'weight', 'style', 'width', 'width_tablet', 'width_mobile', 'css_classes', 'html_tag', 'hide_title', 'page_layout', 'shortcode',
+            'padding_tablet', 'padding_mobile', 'gap_tablet', 'gap_mobile', 'flex_direction_tablet', 'flex_direction_mobile',
+            'typography_typography', 'typography_font_family', 'typography_font_size', 'typography_font_weight', 'typography_line_height', 'button_text_color', 'button_css_id',
         ];
         $clean = [];
         foreach ($settings as $key => $value) {
@@ -1068,7 +1191,7 @@ final class Thesis_AI_Bridge {
             if (!in_array($key, $allowed, true)) {
                 continue;
             }
-            if (in_array($key, ['title', 'editor', 'text'], true)) {
+            if (in_array($key, ['title', 'editor', 'text', 'shortcode'], true)) {
                 $clean[$key] = wp_kses_post((string)$value);
             } elseif ($key === 'link' && is_array($value)) {
                 $clean[$key] = [
@@ -1173,6 +1296,7 @@ final class Thesis_AI_Bridge {
                 'plugin_management' => !empty($settings['plugin_management_enabled']),
             ],
             'approved_plugins' => self::APPROVED_PLUGINS,
+            'approved_themes' => Thesis_AI_Site_Setup::approved_themes(),
             'endpoints' => [
                 'fallback_status' => rest_url('thesis-ai/v1/status'),
                 'fallback_run_base' => rest_url('thesis-ai/v1/run/'),
@@ -1253,10 +1377,12 @@ final class Thesis_AI_Bridge {
             'type' => 'object',
             'properties' => [
                 'name' => ['type' => 'string'],
+                'tagline' => ['type' => 'string'],
                 'url' => ['type' => 'string'],
                 'wordpress_version' => ['type' => 'string'],
                 'php_version' => ['type' => 'string'],
                 'theme' => ['type' => 'string'],
+                'theme_slug' => ['type' => 'string'],
                 'theme_version' => ['type' => 'string'],
                 'is_block_theme' => ['type' => 'boolean'],
                 'permalink_structure' => ['type' => 'string'],
@@ -1265,7 +1391,7 @@ final class Thesis_AI_Bridge {
                 'native_abilities_api' => ['type' => 'boolean'],
                 'bridge_version' => ['type' => 'string'],
             ],
-            'required' => ['name', 'url', 'wordpress_version', 'php_version', 'theme', 'theme_version', 'is_block_theme', 'permalink_structure', 'https', 'multisite', 'native_abilities_api', 'bridge_version'],
+            'required' => ['name', 'tagline', 'url', 'wordpress_version', 'php_version', 'theme', 'theme_slug', 'theme_version', 'is_block_theme', 'permalink_structure', 'https', 'multisite', 'native_abilities_api', 'bridge_version'],
             'additionalProperties' => false,
         ];
     }

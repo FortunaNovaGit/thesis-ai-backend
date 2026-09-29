@@ -11,13 +11,13 @@ from pydantic import BaseModel, Field
 
 from .agents.runtime import make_agent_runtime
 from .config import settings
-from .site_store import SiteStore
+from .connection_token import ConnectionTokenCodec
 from .tools.wordpress import RemoteWordPressExecutor, make_wordpress_executor
 from .workflow import MultiAgentWorkflow
 
 
-app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.4.0")
-site_store = SiteStore(Path(settings.backend_data_file), Path(settings.backend_key_file))
+app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.5.0")
+codec = ConnectionTokenCodec(settings.backend_token_secret, Path(settings.backend_key_file))
 
 
 class BuildRequest(BaseModel):
@@ -31,10 +31,6 @@ class ConnectRequest(BaseModel):
     username: str
     application_password: str
     bridge_version: str = ""
-
-
-class DisconnectRequest(BaseModel):
-    site_id: str
 
 
 def _bearer_token(authorization: str | None) -> str:
@@ -71,15 +67,24 @@ def _validate_site_url(site_url: str) -> str:
     return normalized
 
 
+def _credentials(site_id: str, authorization: str | None):
+    token = _bearer_token(authorization)
+    creds = codec.decode(site_id, token)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Invalid or expired site token")
+    return creds
+
+
 def _result_summary(run) -> dict[str, Any]:
     pages: list[dict[str, Any]] = []
     plugins: list[dict[str, Any]] = []
+    themes: list[dict[str, Any]] = []
+    site_setup: list[dict[str, Any]] = []
     failed_actions: list[dict[str, Any]] = []
     executed_actions_count = 0
 
     def safe_parameters(parameters: dict[str, Any]) -> dict[str, Any]:
-        # Never return arbitrary generated content or secrets to the WordPress admin UI.
-        allowed = {"plugin_slug", "page_id", "title", "slug"}
+        allowed = {"plugin_slug", "theme_slug", "page_id", "title", "slug", "site_title", "menu_name"}
         return {key: value for key, value in parameters.items() if key in allowed}
 
     for execution in run.executions:
@@ -94,120 +99,82 @@ def _result_summary(run) -> dict[str, Any]:
                 "policy_outcome": execution.policy.outcome.value,
                 "policy_reason": execution.policy.reason,
                 "error": execution.error or "Unknown execution error",
+                "attempt": execution.attempt,
             })
-
         if not execution.executed or not isinstance(execution.result, dict):
             continue
-        if execution.action.ability in {"thesis-ai-bridge/create-draft-page", "thesis-ai-bridge/ensure-draft-page", "thesis-ai-bridge/elementor-ensure-draft-page"}:
+        ability = execution.action.ability
+        if ability in {"thesis-ai-bridge/create-draft-page", "thesis-ai-bridge/ensure-draft-page", "thesis-ai-bridge/elementor-ensure-draft-page"}:
             pages.append({
-                "id": execution.result.get("id"),
-                "title": execution.result.get("title", execution.action.parameters.get("title", "")),
-                "status": execution.result.get("status", "draft"),
-                "url": execution.result.get("url"),
-                "edit_url": execution.result.get("edit_url"),
+                "id": execution.result.get("id"), "title": execution.result.get("title", execution.action.parameters.get("title", "")),
+                "status": execution.result.get("status", "draft"), "url": execution.result.get("url"), "edit_url": execution.result.get("edit_url"),
             })
-        if execution.action.ability in {"thesis-ai-bridge/install-approved-plugin", "thesis-ai-bridge/activate-approved-plugin", "thesis-ai-bridge/ensure-approved-plugin"}:
-            plugins.append({
-                "slug": execution.result.get("plugin_slug"),
-                "active": execution.result.get("active"),
-                "message": execution.result.get("message"),
-            })
-    issues = []
-    if run.quality_reports:
-        issues = [issue.model_dump(mode="json") for issue in run.quality_reports[-1].issues]
+        elif ability in {"thesis-ai-bridge/install-approved-plugin", "thesis-ai-bridge/activate-approved-plugin", "thesis-ai-bridge/ensure-approved-plugin"}:
+            plugins.append({"slug": execution.result.get("plugin_slug"), "active": execution.result.get("active"), "message": execution.result.get("message")})
+        elif ability == "thesis-ai-bridge/ensure-approved-theme":
+            themes.append({"slug": execution.result.get("theme_slug"), "active": execution.result.get("active"), "message": execution.result.get("message")})
+        elif ability in {"thesis-ai-bridge/update-site-identity", "thesis-ai-bridge/ensure-navigation-menu", "thesis-ai-bridge/set-homepage-by-slug", "thesis-ai-bridge/set-page-seo"}:
+            site_setup.append({"ability": ability, "result": execution.result})
+
+    issues = [issue.model_dump(mode="json") for issue in run.quality_reports[-1].issues] if run.quality_reports else []
     return {
         "run_id": run.run_id,
         "status": run.status,
+        "agent_mode": settings.resolved_agent_mode,
+        "model": settings.openai_model if settings.resolved_agent_mode == "openai" else "mock",
         "pages": pages,
         "plugins": plugins,
+        "themes": themes,
+        "site_setup": site_setup,
         "issues": issues,
         "failed_actions": failed_actions,
         "executed_actions_count": executed_actions_count,
         "failed_actions_count": len(failed_actions),
         "quality_summary": run.quality_reports[-1].summary if run.quality_reports else "",
         "renderer": run.renderer,
-        "plugin_inventory_count": len(run.site_snapshot.plugins) if run.site_snapshot else 0,
-        "site_capabilities": run.site_snapshot.capabilities if run.site_snapshot else {},
+        "repair_attempts": run.repair_attempts,
+        "usage": run.usage.model_dump(),
+        "plugin_inventory_count": len(run.verification_snapshot.plugins if run.verification_snapshot else (run.site_snapshot.plugins if run.site_snapshot else [])),
+        "verification": run.verification_snapshot.model_dump() if run.verification_snapshot else {},
     }
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.4.1", "agent_mode": settings.agent_mode}
+async def health() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "version": "0.5.0",
+        "agent_mode": settings.resolved_agent_mode,
+        "configured_agent_mode": settings.agent_mode,
+        "model": settings.openai_model if settings.resolved_agent_mode == "openai" else "mock",
+        "stable_connection_tokens": codec.persistent,
+    }
 
 
 @app.post("/v1/sites/connect")
 async def connect_site(payload: ConnectRequest):
     site_url = _validate_site_url(payload.site_url)
-    executor = RemoteWordPressExecutor.from_credentials(
-        site_url=site_url,
-        username=payload.username,
-        application_password=payload.application_password,
-        mode="bridge_rest",
-        verify_ssl=True,
-        timeout=settings.wordpress_timeout_seconds,
-    )
+    executor = RemoteWordPressExecutor.from_credentials(site_url=site_url, username=payload.username, application_password=payload.application_password, mode="bridge_rest", verify_ssl=True, timeout=settings.wordpress_timeout_seconds)
     try:
         probe = await executor.probe()
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not verify WordPress connection: {exc}") from exc
-
-    site_id, site_token = site_store.register(
-        site_url=site_url,
-        username=payload.username,
-        application_password=payload.application_password,
-        bridge_version=str(probe.get("bridge_version", payload.bridge_version)),
-        site_name=payload.site_name,
-    )
-    return {
-        "connected": True,
-        "site_id": site_id,
-        "site_token": site_token,
-        "bridge": probe,
-    }
+    site_id, site_token = codec.issue(site_url=site_url, username=payload.username, application_password=payload.application_password, bridge_version=str(probe.get("bridge_version", payload.bridge_version)), site_name=payload.site_name)
+    return {"connected": True, "site_id": site_id, "site_token": site_token, "bridge": probe, "token_persistence": "stable" if codec.persistent else "ephemeral"}
 
 
 @app.get("/v1/sites/{site_id}/check")
 async def check_site(site_id: str, authorization: str | None = Header(default=None)):
-    token = _bearer_token(authorization)
-    if not site_store.authenticate(site_id, token):
-        raise HTTPException(status_code=401, detail="Invalid site token")
-    creds = site_store.credentials(site_id)
-    if not creds:
-        raise HTTPException(status_code=404, detail="Site connection not found")
-    executor = RemoteWordPressExecutor.from_credentials(
-        site_url=creds.site_url,
-        username=creds.username,
-        application_password=creds.application_password,
-        mode="bridge_rest",
-        verify_ssl=True,
-        timeout=settings.wordpress_timeout_seconds,
-    )
-    return {"connected": True, "bridge": await executor.probe()}
+    creds = _credentials(site_id, authorization)
+    executor = RemoteWordPressExecutor.from_credentials(site_url=creds.site_url, username=creds.username, application_password=creds.application_password, mode="bridge_rest", verify_ssl=True, timeout=settings.wordpress_timeout_seconds)
+    return {"connected": True, "bridge": await executor.probe(), "agent_mode": settings.resolved_agent_mode, "stable_connection_tokens": codec.persistent}
 
 
 @app.post("/v1/sites/{site_id}/build")
 async def build_connected_site(site_id: str, payload: BuildRequest, authorization: str | None = Header(default=None)):
-    token = _bearer_token(authorization)
-    if not site_store.authenticate(site_id, token):
-        raise HTTPException(status_code=401, detail="Invalid site token")
-    creds = site_store.credentials(site_id)
-    if not creds:
-        raise HTTPException(status_code=404, detail="Site connection not found")
-
-    wordpress = RemoteWordPressExecutor.from_credentials(
-        site_url=creds.site_url,
-        username=creds.username,
-        application_password=creds.application_password,
-        mode="bridge_rest",
-        verify_ssl=True,
-        timeout=settings.wordpress_timeout_seconds,
-    )
-    workflow = MultiAgentWorkflow(
-        settings,
-        make_agent_runtime(settings.agent_mode, settings.openai_model),
-        wordpress,
-    )
+    creds = _credentials(site_id, authorization)
+    wordpress = RemoteWordPressExecutor.from_credentials(site_url=creds.site_url, username=creds.username, application_password=creds.application_password, mode="bridge_rest", verify_ssl=True, timeout=settings.wordpress_timeout_seconds)
+    workflow = MultiAgentWorkflow(settings, make_agent_runtime(settings.resolved_agent_mode, settings.openai_model), wordpress)
     try:
         run = await workflow.run(payload.request, payload.renderer)
     except Exception as exc:
@@ -217,27 +184,19 @@ async def build_connected_site(site_id: str, payload: BuildRequest, authorizatio
 
 @app.post("/v1/sites/{site_id}/disconnect")
 async def disconnect_site(site_id: str, authorization: str | None = Header(default=None)):
-    token = _bearer_token(authorization)
-    if not site_store.authenticate(site_id, token):
-        raise HTTPException(status_code=401, detail="Invalid site token")
-    removed = site_store.delete(site_id)
-    return {"disconnected": removed}
+    _credentials(site_id, authorization)
+    # Stateless token: WordPress revokes the Application Password locally. The
+    # encrypted bearer token becomes useless as soon as that credential is revoked.
+    return {"disconnected": True}
 
 
-# Developer compatibility endpoints retained for local testing of a manually
-# configured WordPress target. End users do not use these routes.
 @app.get("/wordpress/check")
 async def wordpress_check():
     wp = make_wordpress_executor(settings)
-    result = {"connection": await wp.probe()}
-    return result
+    return {"connection": await wp.probe()}
 
 
 @app.post("/projects/build")
 async def build_site(payload: BuildRequest):
-    workflow = MultiAgentWorkflow(
-        settings,
-        make_agent_runtime(settings.agent_mode, settings.openai_model),
-        make_wordpress_executor(settings),
-    )
+    workflow = MultiAgentWorkflow(settings, make_agent_runtime(settings.resolved_agent_mode, settings.openai_model), make_wordpress_executor(settings))
     return await workflow.run(payload.request, payload.renderer)

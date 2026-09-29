@@ -24,28 +24,40 @@ class PolicyEngine:
         "wordpress-seo",
         "seo-by-rank-math",
     }
+    APPROVED_THEMES = {"hello-elementor"}
+
+    READ_ROLES = frozenset({AgentRole.ARCHITECT, AgentRole.BUILDER, AgentRole.QUALITY})
+    BUILD_ROLE = frozenset({AgentRole.BUILDER})
 
     RULES: dict[str, Rule] = {
-        "thesis-ai-bridge/get-site-info": Rule(RiskLevel.LOW, frozenset({AgentRole.ARCHITECT, AgentRole.BUILDER, AgentRole.QUALITY})),
-        "thesis-ai-bridge/list-pages": Rule(RiskLevel.LOW, frozenset({AgentRole.ARCHITECT, AgentRole.BUILDER, AgentRole.QUALITY})),
-        "thesis-ai-bridge/get-page": Rule(RiskLevel.LOW, frozenset({AgentRole.ARCHITECT, AgentRole.BUILDER, AgentRole.QUALITY})),
-        "thesis-ai-bridge/list-plugins": Rule(RiskLevel.LOW, frozenset({AgentRole.ARCHITECT, AgentRole.BUILDER, AgentRole.QUALITY})),
-        "thesis-ai-bridge/inspect-capabilities": Rule(RiskLevel.LOW, frozenset({AgentRole.ARCHITECT, AgentRole.BUILDER, AgentRole.QUALITY})),
+        "thesis-ai-bridge/get-site-info": Rule(RiskLevel.LOW, READ_ROLES),
+        "thesis-ai-bridge/list-pages": Rule(RiskLevel.LOW, READ_ROLES),
+        "thesis-ai-bridge/get-page": Rule(RiskLevel.LOW, READ_ROLES),
+        "thesis-ai-bridge/list-plugins": Rule(RiskLevel.LOW, READ_ROLES),
+        "thesis-ai-bridge/list-themes": Rule(RiskLevel.LOW, READ_ROLES),
+        "thesis-ai-bridge/inspect-capabilities": Rule(RiskLevel.LOW, READ_ROLES),
+        "thesis-ai-bridge/get-site-structure": Rule(RiskLevel.LOW, READ_ROLES),
         "thesis-ai-bridge/get-approved-plugin-info": Rule(RiskLevel.LOW, frozenset({AgentRole.ARCHITECT, AgentRole.BUILDER})),
-        "thesis-ai-bridge/elementor-get-status": Rule(RiskLevel.LOW, frozenset({AgentRole.ARCHITECT, AgentRole.BUILDER, AgentRole.QUALITY})),
-        "thesis-ai-bridge/elementor-get-page": Rule(RiskLevel.LOW, frozenset({AgentRole.ARCHITECT, AgentRole.BUILDER, AgentRole.QUALITY})),
-        "thesis-ai-bridge/create-draft-page": Rule(RiskLevel.LOW, frozenset({AgentRole.BUILDER})),
-        "thesis-ai-bridge/ensure-draft-page": Rule(RiskLevel.LOW, frozenset({AgentRole.BUILDER})),
-        "thesis-ai-bridge/elementor-ensure-draft-page": Rule(RiskLevel.LOW, frozenset({AgentRole.BUILDER})),
-        "thesis-ai-bridge/update-page": Rule(RiskLevel.MEDIUM, frozenset({AgentRole.BUILDER})),
-        "thesis-ai-bridge/set-homepage": Rule(RiskLevel.MEDIUM, frozenset({AgentRole.BUILDER})),
-        "thesis-ai-bridge/install-approved-plugin": Rule(RiskLevel.MEDIUM, frozenset({AgentRole.BUILDER})),
-        "thesis-ai-bridge/activate-approved-plugin": Rule(RiskLevel.MEDIUM, frozenset({AgentRole.BUILDER})),
-        "thesis-ai-bridge/deactivate-approved-plugin": Rule(RiskLevel.MEDIUM, frozenset({AgentRole.BUILDER})),
-        "thesis-ai-bridge/ensure-approved-plugin": Rule(RiskLevel.MEDIUM, frozenset({AgentRole.BUILDER})),
-        "acf.apply-model": Rule(RiskLevel.MEDIUM, frozenset({AgentRole.BUILDER})),
-        "woocommerce.configure": Rule(RiskLevel.MEDIUM, frozenset({AgentRole.BUILDER})),
-        "snippets.execute-php": Rule(RiskLevel.HIGH, frozenset({AgentRole.BUILDER}), approval_required=True),
+        "thesis-ai-bridge/elementor-get-status": Rule(RiskLevel.LOW, READ_ROLES),
+        "thesis-ai-bridge/elementor-get-page": Rule(RiskLevel.LOW, READ_ROLES),
+        "thesis-ai-bridge/create-draft-page": Rule(RiskLevel.LOW, BUILD_ROLE),
+        "thesis-ai-bridge/ensure-draft-page": Rule(RiskLevel.LOW, BUILD_ROLE),
+        "thesis-ai-bridge/elementor-ensure-draft-page": Rule(RiskLevel.LOW, BUILD_ROLE),
+        "thesis-ai-bridge/set-page-seo": Rule(RiskLevel.LOW, BUILD_ROLE),
+        "thesis-ai-bridge/update-page": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
+        "thesis-ai-bridge/set-homepage": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
+        "thesis-ai-bridge/set-homepage-by-slug": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
+        "thesis-ai-bridge/update-site-identity": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
+        "thesis-ai-bridge/ensure-navigation-menu": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
+        "thesis-ai-bridge/install-approved-plugin": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
+        "thesis-ai-bridge/activate-approved-plugin": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
+        "thesis-ai-bridge/deactivate-approved-plugin": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
+        "thesis-ai-bridge/ensure-approved-plugin": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
+        "thesis-ai-bridge/ensure-approved-theme": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
+        "thesis-ai-bridge/ensure-contact-form": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
+        "acf.apply-model": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
+        "woocommerce.configure": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
+        "snippets.execute-php": Rule(RiskLevel.HIGH, BUILD_ROLE, approval_required=True),
         "raw-sql.execute": Rule(RiskLevel.CRITICAL, frozenset(), blocked=True),
         "filesystem.write": Rule(RiskLevel.CRITICAL, frozenset(), blocked=True),
         "auth.change": Rule(RiskLevel.CRITICAL, frozenset(), blocked=True),
@@ -61,19 +73,17 @@ class PolicyEngine:
         if actor not in rule.allowed_roles:
             return PolicyDecision(ability=action.ability, risk=rule.risk, outcome=PolicyOutcome.BLOCK, reason=f"Role {actor.value} is not allowed to execute this ability.")
 
-        if action.ability in {
-            "thesis-ai-bridge/install-approved-plugin",
-            "thesis-ai-bridge/activate-approved-plugin",
-            "thesis-ai-bridge/deactivate-approved-plugin",
-            "thesis-ai-bridge/ensure-approved-plugin",
-            "thesis-ai-bridge/get-approved-plugin-info",
-        }:
+        if "plugin" in action.ability and "approved" in action.ability:
             slug = str(action.parameters.get("plugin_slug", ""))
-            if slug not in self.APPROVED_PLUGINS:
+            if slug and slug not in self.APPROVED_PLUGINS:
                 return PolicyDecision(ability=action.ability, risk=RiskLevel.HIGH, outcome=PolicyOutcome.BLOCK, reason=f"Plugin '{slug}' is not in the approved catalogue.")
+        if action.ability == "thesis-ai-bridge/ensure-approved-theme":
+            slug = str(action.parameters.get("theme_slug", ""))
+            if slug not in self.APPROVED_THEMES:
+                return PolicyDecision(ability=action.ability, risk=RiskLevel.HIGH, outcome=PolicyOutcome.BLOCK, reason=f"Theme '{slug}' is not in the approved catalogue.")
 
         if rule.approval_required:
             return PolicyDecision(ability=action.ability, risk=rule.risk, outcome=PolicyOutcome.REQUIRE_APPROVAL, reason="High-risk operation requires explicit human approval.")
         if rule.risk == RiskLevel.MEDIUM and not auto_approve_medium:
             return PolicyDecision(ability=action.ability, risk=rule.risk, outcome=PolicyOutcome.REQUIRE_APPROVAL, reason="Medium-risk auto-approval is disabled.")
-        return PolicyDecision(ability=action.ability, risk=rule.risk, outcome=PolicyOutcome.ALLOW, reason="Action satisfies the deterministic policy rules.")
+        return PolicyDecision(ability=action.ability, risk=rule.risk, outcome=PolicyOutcome.ALLOW, reason="Action satisfies deterministic policy rules.")

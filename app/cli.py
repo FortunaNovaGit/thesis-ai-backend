@@ -14,7 +14,7 @@ from .workflow import MultiAgentWorkflow
 
 
 async def _build(request: str) -> None:
-    agents = make_agent_runtime(settings.agent_mode, settings.openai_model)
+    agents = make_agent_runtime(settings.resolved_agent_mode, settings.openai_model)
     wp = make_wordpress_executor(settings)
     workflow = MultiAgentWorkflow(settings, agents, wp, Path("runs"))
     result = await workflow.run(request)
@@ -40,7 +40,7 @@ def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] not in known_commands and not sys.argv[1].startswith("-"):
         sys.argv.insert(1, "build")
 
-    parser = argparse.ArgumentParser(description="5-agent WordPress thesis prototype v0.4")
+    parser = argparse.ArgumentParser(description="5-agent WordPress thesis prototype v0.5")
     sub = parser.add_subparsers(dest="command", required=True)
 
     build_parser = sub.add_parser("build", help="Run the five-agent workflow")

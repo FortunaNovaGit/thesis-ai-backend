@@ -1,44 +1,112 @@
-# WordPress Multi-Agent Thesis MVP v0.4.1
+# WordPress Multi-Agent Thesis MVP — v0.5.0
 
-Ця версія додає повний preflight сайту, автоматичну інвентаризацію plugins, capability resolution, безпечне auto-install/activate approved plugins та Elementor Free adapter.
+Робочий прототип магістерської системи для автоматизованого формування WordPress-вебзастосунків за допомогою п'яти спеціалізованих агентів.
 
-## Що змінилося у v0.4
+## Що вже робить v0.5
 
-1. Перед planning backend обов'язково виконує read-only preflight:
-   - `get-site-info`
-   - `list-plugins` — усі встановлені plugins
-   - `inspect-capabilities` — відомі capabilities та стан approved plugins
-2. Architect отримує реальний `SiteSnapshot` і не повинен планувати встановлення plugin, якщо capability уже доступна.
-3. Додана atomic ability `ensure-approved-plugin`: якщо plugin відсутній — встановити з WordPress.org; якщо неактивний — активувати; якщо вже активний — нічого не змінювати.
-4. Approved catalogue: Elementor, WooCommerce, ACF Free, Contact Form 7, Yoast SEO, Rank Math SEO.
-5. Доданий Elementor Free renderer:
-   - `elementor-get-status`
-   - `elementor-get-page`
-   - `elementor-ensure-draft-page`
-6. Elementor payload проходить deterministic validation: дозволені тільки containers і обмежений список Free widgets; unknown widgets/settings відкидаються або блокуються.
-7. Elementor document зберігається через Elementor Document API (`documents->get()->save()`), сторінки залишаються draft.
-8. В UI можна вибрати Elementor / Gutenberg / Auto та окремо дозволити auto-install approved plugins.
+1. **Orchestrator** — створює task graph і координує workflow.
+2. **Architect & Capability** — аналізує prompt, реальний WordPress, plugins/themes і визначає, чого бракує.
+3. **Design / Content / SEO** — формує структурований дизайн, контент, адаптивність та SEO-специфікацію.
+4. **WordPress Implementation** — через Policy Engine виконує лише контрольовані Bridge abilities.
+5. **Quality & Security** — повторно інспектує реальний WordPress, формує issues і може запустити repair loop.
 
-## Безпека
+Основний renderer: **Elementor Free**. Gutenberg лишається fallback.
 
-- SSH / shell / raw SQL не використовуються.
-- Plugin install дозволений тільки для hard-coded allowlist та тільки з WordPress.org.
-- Unknown plugin slugs Policy Engine блокує.
-- Builder не отримує Administrator password; використовується окремий AI Builder user + Application Password.
-- Generated Elementor structure має limits на depth/element count і allowlist widget types.
-- Existing/published/foreign pages не перезаписуються автоматично.
-- Сторінки створюються як Draft.
+## Основний flow
 
-## Тестовий workflow
+```text
+WordPress plugin
+  -> Render/FastAPI backend
+  -> Orchestrator
+  -> Site preflight
+  -> Architect & Capability
+  -> Design / Content / SEO
+  -> Builder
+  -> Policy Engine
+  -> Thesis AI Bridge abilities
+  -> WordPress / Elementor
+  -> Post-build verification
+  -> Quality & Security
+  -> Repair loop (за потреби)
+```
 
-`Prompt → Orchestrator → site/plugin preflight → Architect/Capability → Design/Content/SEO → Policy Engine → ensure plugins → Elementor/Gutenberg renderer → structural QA`
+## Нове у v0.5
 
-Browser/Playwright QA ще не підключений і не заявляється як пройдений.
+- реальні OpenAI agents при наявному `OPENAI_API_KEY`; без ключа автоматично використовується deterministic mock;
+- structured Pydantic outputs для всіх агентів;
+- usage metrics (requests/input/output/total tokens);
+- стабільні stateless connection tokens через `BACKEND_TOKEN_SECRET`, тому Render redeploy більше не має скидати підключення;
+- повний preflight: site info, pages, plugins, themes, recognized capabilities, homepage/menu structure;
+- approved theme resolver та автоматичний Hello Elementor;
+- approved plugin resolver / reuse / install / activate;
+- Elementor PageSpec renderer зі стилями, responsive containers, cards, buttons і shortcode widget;
+- Contact Form 7 auto-install + створення reusable `AI Contact` форми, якщо prompt потребує форми/запису;
+- site title + tagline;
+- navigation menu;
+- static homepage;
+- SEO title + meta description; інтеграція з Yoast/Rank Math, а без них Bridge має власний lightweight frontend fallback;
+- post-build verification snapshot;
+- до 2 repair loops для безпечних idempotent actions;
+- retry transient WordPress actions;
+- human-in-the-loop publishing: агенти залишають сторінки draft; адмін окремою кнопкою публікує AI-owned pages після перевірки;
+- default-deny Policy Engine, allowlist plugins/themes, без shell/raw SQL/direct filesystem abilities.
 
-## Render
+## Approved dependencies у v0.5
 
-Поточний backend сумісний з Render Docker Web Service. Після push нового коду Render auto-deploy має показати `/health` version `0.4.1`.
+Plugins:
+- Elementor
+- WooCommerce
+- Advanced Custom Fields
+- Contact Form 7
+- Yoast SEO
+- Rank Math SEO
 
-## Важливо для Render Free
+Theme:
+- Hello Elementor
 
-Поточний SiteStore ще файловий. Для тестів це прийнятно, але deploy/restart може стерти connection state. Для production наступний етап — PostgreSQL.
+Система може **інспектувати всі** встановлені plugins/themes, але автоматично встановлює лише allowlisted dependencies.
+
+## Render environment
+
+Для існуючого Render Web Service додайте:
+
+```text
+AGENT_MODE=auto
+OPENAI_MODEL=gpt-5.6-terra
+OPENAI_API_KEY=<secret>          # потрібен тільки для real-agent mode
+BACKEND_TOKEN_SECRET=<generated random secret>
+AUTO_APPROVE_MEDIUM_RISK=true
+ALLOW_INSECURE_WORDPRESS=false
+ALLOW_PRIVATE_WORDPRESS=false
+```
+
+**BACKEND_TOKEN_SECRET не змінюйте після підключення сайтів.** Це master secret для self-contained encrypted site tokens. Якщо його змінити, WordPress треба перепідключити.
+
+Після переходу з v0.4 на v0.5 потрібно один раз `Відключити -> Підключити AI Builder`, бо старий site token був створений іншим ключем.
+
+## Локальний запуск
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+```
+
+Backend: `http://localhost:8000/health`
+
+## Тести
+
+```bash
+pytest -q
+```
+
+v0.5 test suite покриває Policy Engine, stateless connection tokens, rerunnable page creation, plugin/theme resolver і повний mock Elementor workflow із формою, menu/homepage/site identity.
+
+## Що свідомо ще НЕ входить
+
+- повний Playwright browser/visual QA;
+- автоматична генерація/пошук зображень;
+- повний ACF data-model executor;
+- повна WooCommerce конфігурація/товари/shipping/checkout;
+- PostgreSQL project/run history.
+
+Ці речі логічно додавати після стабілізації real-agent Elementor generation. Поточна версія вже готує для них capability/plugin layer.

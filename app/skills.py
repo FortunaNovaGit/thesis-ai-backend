@@ -27,6 +27,8 @@ SKILLS: dict[AgentRole, list[dict[str, str]]] = {
     ],
     AgentRole.BUILDER: [
         {"name": "elementor-adapter", "type": "project", "purpose": "Render controlled PageSpec structures as editable Elementor Free documents."},
+        {"name": "site-assembly", "type": "project", "purpose": "Configure approved theme, site identity, navigation, homepage and SEO metadata after page creation."},
+        {"name": "dependency-preflight", "type": "project", "purpose": "Inspect plugins/themes and idempotently satisfy only missing approved capabilities."},
         {"name": "wp-block-development", "type": "official-wordpress", "purpose": "Build Gutenberg blocks correctly."},
         {"name": "wp-block-themes", "type": "official-wordpress", "purpose": "Implement block theme structures and styles."},
         {"name": "wp-plugin-development", "type": "official-wordpress", "purpose": "Follow WordPress plugin patterns and security practices."},
@@ -41,6 +43,7 @@ SKILLS: dict[AgentRole, list[dict[str, str]]] = {
         {"name": "wp-abilities-verify", "type": "official-wordpress", "purpose": "Verify abilities behave as declared."},
         {"name": "wp-performance", "type": "official-wordpress", "purpose": "Review WordPress performance patterns."},
         {"name": "site-quality-audit", "type": "project", "purpose": "Combine SEO, accessibility, performance and security gates."},
+        {"name": "closed-loop-repair", "type": "project", "purpose": "Turn verified failures into bounded repair actions and re-verify."},
     ],
 }
 

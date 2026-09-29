@@ -1,7 +1,7 @@
 [project]
 name = "wp-multiagent-thesis"
-version = "0.4.0"
-description = "Installable 5-agent WordPress multi-agent system for a master's thesis"
+version = "0.5.0"
+description = "Five-agent WordPress/Elementor site builder prototype for a master's thesis"
 requires-python = ">=3.11"
 dependencies = [
   "openai-agents>=0.6.0",

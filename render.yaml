@@ -7,7 +7,13 @@ services:
     healthCheckPath: /health
     envVars:
       - key: AGENT_MODE
-        value: mock
+        value: auto
+      - key: OPENAI_MODEL
+        value: gpt-5.6-terra
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: BACKEND_TOKEN_SECRET
+        generateValue: true
       - key: AUTO_APPROVE_MEDIUM_RISK
         value: "true"
       - key: ALLOW_INSECURE_WORDPRESS

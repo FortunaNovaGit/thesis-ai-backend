@@ -48,3 +48,29 @@ def test_mock_shop_installs_only_approved_woocommerce(tmp_path: Path):
     assert executor.plugins["woocommerce"]["active"] is True
     assert "elementor" in executor.plugins
     assert executor.plugins["elementor"]["active"] is True
+
+
+def test_mock_booking_site_installs_form_theme_and_site_structure(tmp_path: Path):
+    settings = Settings(agent_mode="mock", wordpress_mode="mock", auto_approve_medium_risk=True)
+    executor = MockWordPressExecutor()
+    workflow = MultiAgentWorkflow(settings, MockAgentRuntime(), executor, tmp_path)
+    result = asyncio.run(
+        workflow.run(
+            "Створи сайт стоматології з послугами, лікарями та формою запису",
+            "elementor",
+        )
+    )
+    assert result.status == "passed"
+    assert executor.plugins["elementor"]["active"] is True
+    assert executor.plugins["contact-form-7"]["active"] is True
+    assert executor.themes["hello-elementor"]["active"] is True
+    assert executor.homepage_id is not None
+    assert executor.site_title == "Стоматологічна клініка"
+    assert "home" in executor.menu
+    abilities = [x.action.ability for x in result.executions if x.executed]
+    assert "thesis-ai-bridge/ensure-contact-form" in abilities
+    assert "thesis-ai-bridge/update-site-identity" in abilities
+    assert "thesis-ai-bridge/ensure-navigation-menu" in abilities
+    assert "thesis-ai-bridge/set-homepage-by-slug" in abilities
+    assert result.verification_snapshot is not None
+    assert result.verification_snapshot.structure.get("homepage_slug") == "home"
