@@ -19,10 +19,10 @@ from .tools.wordpress import RemoteWordPressExecutor, make_wordpress_executor
 from .workflow import MultiAgentWorkflow
 
 
-app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.5.1")
+app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.5.2")
 codec = ConnectionTokenCodec(settings.backend_token_secret, Path(settings.backend_key_file))
 
-# v0.5.1 test queue: long builds run outside the request that starts them.
+# v0.5.2 test queue: long builds run outside the request that starts them.
 # This avoids WordPress/hosting gateway timeouts while keeping the current
 # single Render web service architecture. PostgreSQL/Redis durability can be
 # added later without changing the WordPress-facing API.
@@ -135,6 +135,28 @@ def _result_summary(run) -> dict[str, Any]:
         elif ability in {"thesis-ai-bridge/update-site-identity", "thesis-ai-bridge/ensure-navigation-menu", "thesis-ai-bridge/set-homepage-by-slug", "thesis-ai-bridge/set-page-seo"}:
             site_setup.append({"ability": ability, "result": execution.result})
 
+    # Keep only the latest failure/success state per logical action in the user-facing
+    # diagnostics. Repair retries should not look like dozens of unique failures.
+    latest_failure_by_key: dict[str, dict[str, Any]] = {}
+    successful_keys: set[str] = set()
+    for execution in run.executions:
+        key = execution.action.ability + "|" + repr(sorted(execution.action.parameters.items(), key=lambda item: item[0]))
+        if execution.executed:
+            successful_keys.add(key)
+            latest_failure_by_key.pop(key, None)
+        else:
+            latest_failure_by_key[key] = {
+                "ability": execution.action.ability,
+                "rationale": execution.action.rationale,
+                "parameters": safe_parameters(execution.action.parameters),
+                "risk": execution.policy.risk.value,
+                "policy_outcome": execution.policy.outcome.value,
+                "policy_reason": execution.policy.reason,
+                "error": execution.error or "Unknown execution error",
+                "attempt": execution.attempt,
+            }
+    failed_actions = list(latest_failure_by_key.values())
+
     issues = [issue.model_dump(mode="json") for issue in run.quality_reports[-1].issues] if run.quality_reports else []
     return {
         "run_id": run.run_id,
@@ -162,7 +184,7 @@ def _result_summary(run) -> dict[str, Any]:
 async def health() -> dict[str, Any]:
     return {
         "status": "ok",
-        "version": "0.5.1",
+        "version": "0.5.2",
         "agent_mode": settings.resolved_agent_mode,
         "configured_agent_mode": settings.agent_mode,
         "model": settings.openai_model if settings.resolved_agent_mode == "openai" else "mock",

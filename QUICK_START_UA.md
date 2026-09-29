@@ -1,4 +1,4 @@
-# Quick Start — v0.5.1
+# Quick Start — v0.5.2
 
 ## 1. Оновити backend у GitHub
 
@@ -33,7 +33,7 @@ ALLOW_PRIVATE_WORDPRESS=false
 ```json
 {
   "status": "ok",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "agent_mode": "openai",
   "stable_connection_tokens": true
 }
@@ -43,7 +43,7 @@ ALLOW_PRIVATE_WORDPRESS=false
 
 ## 3. Оновити WordPress plugin
 
-Upload `thesis-ai-bridge-v0.5.1.zip` поверх поточної версії.
+Upload `thesis-ai-bridge-v0.5.2.zip` поверх поточної версії.
 
 Після першого переходу на stable `BACKEND_TOKEN_SECRET` зробіть один раз:
 

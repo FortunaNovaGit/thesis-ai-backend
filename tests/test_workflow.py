@@ -74,3 +74,26 @@ def test_mock_booking_site_installs_form_theme_and_site_structure(tmp_path: Path
     assert "thesis-ai-bridge/set-homepage-by-slug" in abilities
     assert result.verification_snapshot is not None
     assert result.verification_snapshot.structure.get("homepage_slug") == "home"
+
+class FlakyPageExecutor(MockWordPressExecutor):
+    def __init__(self):
+        super().__init__()
+        self.failed_once = False
+
+    async def execute(self, action):
+        if action.ability == "thesis-ai-bridge/elementor-ensure-draft-page" and action.parameters.get("slug") == "home" and not self.failed_once:
+            self.failed_once = True
+            raise RuntimeError("Transient page creation failure")
+        return await super().execute(action)
+
+
+def test_repair_success_overrides_historical_failure(tmp_path: Path):
+    settings = Settings(agent_mode="mock", wordpress_mode="mock", auto_approve_medium_risk=True, max_repair_loops=2, transient_action_retries=0)
+    executor = FlakyPageExecutor()
+    workflow = MultiAgentWorkflow(settings, MockAgentRuntime(), executor, tmp_path)
+    result = asyncio.run(workflow.run("Створи простий сайт стоматології"))
+    assert result.status == "passed"
+    assert result.repair_attempts >= 1
+    home_attempts = [x for x in result.executions if x.action.ability == "thesis-ai-bridge/elementor-ensure-draft-page" and x.action.parameters.get("slug") == "home"]
+    assert any(not x.executed for x in home_attempts)
+    assert home_attempts[-1].executed is True

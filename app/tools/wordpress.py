@@ -195,7 +195,7 @@ class RemoteWordPressExecutor(WordPressExecutor):
             auth=self.auth,
             timeout=self.timeout,
             verify=self.verify,
-            headers={"User-Agent": "Thesis-AI-Backend/0.5.0", "Accept": "application/json"},
+            headers={"User-Agent": "Thesis-AI-Backend/0.5.2", "Accept": "application/json"},
             follow_redirects=True,
         )
 

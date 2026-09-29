@@ -461,8 +461,17 @@ class MockAgentRuntime(AgentRuntime):
 
     async def quality(self, app_spec: ApplicationSpec, experience_spec: ExperienceSpec, executions_json: str, verification_snapshot: SiteSnapshot, renderer: Renderer) -> QualityReport:
         executions = json.loads(executions_json)
-        failures = [x for x in executions if not x.get("executed") and x.get("policy", {}).get("outcome") != "require_approval"]
-        pending = [x for x in executions if x.get("policy", {}).get("outcome") == "require_approval"]
+        # Evaluate the latest outcome for each logical action instead of counting every
+        # historical attempt. Otherwise one transient failure remains a permanent QA
+        # failure even after a successful repair, and repair loops inflate the count.
+        latest: dict[str, dict] = {}
+        for item in executions:
+            action = item.get("action") or {}
+            key = str(action.get("ability", "")) + "|" + json.dumps(action.get("parameters", {}), sort_keys=True, ensure_ascii=False)
+            latest[key] = item
+        latest_items = list(latest.values())
+        failures = [x for x in latest_items if not x.get("executed") and x.get("policy", {}).get("outcome") != "require_approval"]
+        pending = [x for x in latest_items if x.get("policy", {}).get("outcome") == "require_approval"]
         issues: list[QualityIssue] = []
         required_slugs = {p.slug for p in app_spec.pages}
         actual_slugs = {str(p.get("slug", "")) for p in verification_snapshot.pages}
@@ -484,15 +493,18 @@ class MockAgentRuntime(AgentRuntime):
         executions = json.loads(executions_json)
         actions: list[BuildAction] = []
         safe_retry = {"thesis-ai-bridge/elementor-ensure-draft-page", "thesis-ai-bridge/ensure-draft-page", "thesis-ai-bridge/set-page-seo", "thesis-ai-bridge/update-site-identity", "thesis-ai-bridge/ensure-navigation-menu", "thesis-ai-bridge/set-homepage-by-slug", "thesis-ai-bridge/ensure-approved-plugin", "thesis-ai-bridge/ensure-approved-theme"}
-        seen: set[str] = set()
+        latest: dict[str, dict] = {}
         for item in executions:
+            action = item.get("action") or {}
+            ability = str(action.get("ability", ""))
+            key = ability + json.dumps(action.get("parameters", {}), sort_keys=True, ensure_ascii=False)
+            latest[key] = item
+        for key, item in latest.items():
             if item.get("executed"):
                 continue
             action = item.get("action") or {}
             ability = str(action.get("ability", ""))
-            key = ability + json.dumps(action.get("parameters", {}), sort_keys=True, ensure_ascii=False)
-            if ability in safe_retry and key not in seen:
-                seen.add(key)
+            if ability in safe_retry:
                 actions.append(BuildAction(ability=ability, parameters=action.get("parameters", {}), rationale="Repair retry after verification failure"))
         return BuildPlan(actions=actions)
 
