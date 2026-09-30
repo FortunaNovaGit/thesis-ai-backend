@@ -97,3 +97,36 @@ def test_repair_success_overrides_historical_failure(tmp_path: Path):
     home_attempts = [x for x in result.executions if x.action.ability == "thesis-ai-bridge/elementor-ensure-draft-page" and x.action.parameters.get("slug") == "home"]
     assert any(not x.executed for x in home_attempts)
     assert home_attempts[-1].executed is True
+
+class CountingBatchExecutor(MockWordPressExecutor):
+    def __init__(self):
+        super().__init__()
+        self.batch_calls = 0
+        self.snapshot_calls = 0
+
+    async def execute(self, action):
+        if action.ability == "thesis-ai-bridge/get-site-snapshot":
+            self.snapshot_calls += 1
+        return await super().execute(action)
+
+    async def execute_batch(self, actions, *, include_snapshot=True):
+        self.batch_calls += 1
+        return await super().execute_batch(actions, include_snapshot=include_snapshot)
+
+
+def test_workflow_uses_batches_and_no_extra_verification_request(tmp_path: Path):
+    settings = Settings(
+        agent_mode="mock",
+        wordpress_mode="mock",
+        auto_approve_medium_risk=True,
+        wordpress_batch_size=50,
+        max_repair_loops=0,
+    )
+    executor = CountingBatchExecutor()
+    workflow = MultiAgentWorkflow(settings, MockAgentRuntime(), executor, tmp_path)
+    result = asyncio.run(workflow.run("Створи простий сайт стоматології"))
+    assert result.status == "passed"
+    # One preflight snapshot over WordPress HTTP, then the build batch itself returns
+    # the post-build snapshot. The mock batch internally creates the snapshot locally.
+    assert executor.batch_calls == 1
+    assert executor.snapshot_calls == 2

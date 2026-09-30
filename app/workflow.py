@@ -61,6 +61,107 @@ class MultiAgentWorkflow:
         self._save(run)
         return execution
 
+    async def _execute_actions_batched(
+        self,
+        run: ProjectRun,
+        actions: list[BuildAction],
+        actor: AgentRole,
+        *,
+        attempt: int = 1,
+        progress_start: int = 50,
+        progress_end: int = 75,
+    ) -> tuple[bool, SiteSnapshot | None]:
+        """Policy-check actions individually, then execute allowed actions in small HTTP batches.
+
+        This is specifically designed for managed WordPress hosts such as EasyWP:
+        dozens of agent actions become only a few inbound REST requests. The final
+        batch returns a fresh site snapshot, so verification does not need another
+        immediate request that could trip Anti-DDoS rate limiting.
+        """
+        has_pending_approval = False
+        approved: list[tuple[BuildAction, object]] = []
+
+        for action in actions:
+            decision = self.policy.evaluate(
+                actor=actor, action=action, auto_approve_medium=self.settings.auto_approve_medium_risk
+            )
+            if decision.outcome == PolicyOutcome.ALLOW:
+                approved.append((action, decision))
+            elif decision.outcome == PolicyOutcome.REQUIRE_APPROVAL:
+                has_pending_approval = True
+                run.executions.append(ActionExecution(
+                    action=action, policy=decision, executed=False,
+                    error="Waiting for human approval", attempt=attempt
+                ))
+            else:
+                run.executions.append(ActionExecution(
+                    action=action, policy=decision, executed=False,
+                    error="Blocked by policy", attempt=attempt
+                ))
+        self._save(run)
+
+        if not approved:
+            return has_pending_approval, None
+
+        batch_size = max(1, int(self.settings.wordpress_batch_size))
+        latest_snapshot: SiteSnapshot | None = None
+        total = len(approved)
+        chunks = [approved[i:i + batch_size] for i in range(0, total, batch_size)]
+
+        processed = 0
+        for chunk_index, chunk in enumerate(chunks):
+            chunk_actions = [item[0] for item in chunk]
+            include_snapshot = chunk_index == len(chunks) - 1
+            pct = progress_start + int((processed / max(1, total)) * max(1, progress_end - progress_start))
+            await self._progress(
+                "building" if actor == AgentRole.BUILDER else "repair",
+                min(progress_end, pct),
+                f"Executing WordPress batch {chunk_index + 1}/{len(chunks)} ({len(chunk_actions)} actions)",
+            )
+            try:
+                payload = await self.wordpress.execute_batch(chunk_actions, include_snapshot=include_snapshot)
+            except Exception as exc:
+                for action, decision in chunk:
+                    run.executions.append(ActionExecution(
+                        action=action, policy=decision, executed=False, error=str(exc), attempt=attempt
+                    ))
+                self._save(run)
+                # Do not hammer a managed-host firewall with additional batches after
+                # a transport/rate-limit failure. Stop this phase immediately.
+                break
+
+            result_items = payload.get("results", []) if isinstance(payload, dict) else []
+            by_index = {int(item.get("index", -1)): item for item in result_items if isinstance(item, dict)}
+            for local_index, (action, decision) in enumerate(chunk):
+                item = by_index.get(local_index, {})
+                ok = bool(item.get("ok"))
+                run.executions.append(ActionExecution(
+                    action=action,
+                    policy=decision,
+                    executed=ok,
+                    result=item.get("result") if ok else None,
+                    error=None if ok else str(item.get("error") or "Unknown batch execution error"),
+                    attempt=attempt,
+                ))
+            processed += len(chunk)
+
+            raw_snapshot = payload.get("snapshot") if isinstance(payload, dict) else None
+            if isinstance(raw_snapshot, dict):
+                latest_snapshot = SiteSnapshot(
+                    site_info=raw_snapshot.get("site_info") or {},
+                    pages=raw_snapshot.get("pages") or [],
+                    plugins=raw_snapshot.get("plugins") or [],
+                    themes=raw_snapshot.get("themes") or [],
+                    capabilities=raw_snapshot.get("capabilities") or {},
+                    structure=raw_snapshot.get("structure") or {},
+                )
+            self._save(run)
+
+            if chunk_index < len(chunks) - 1 and self.settings.wordpress_inter_batch_delay_seconds > 0:
+                await asyncio.sleep(float(self.settings.wordpress_inter_batch_delay_seconds))
+
+        return has_pending_approval, latest_snapshot
+
     async def _inspect_site(self, run: ProjectRun, actor: AgentRole = AgentRole.ARCHITECT) -> SiteSnapshot:
         # One composite Bridge call replaces six back-to-back REST requests. This
         # materially reduces managed-hosting firewall pressure during preflight,
@@ -109,20 +210,18 @@ class MultiAgentWorkflow:
 
         await self._progress("build_plan", 48, "Implementation agent is compiling the build plan")
         run.build_plan = await self.agents.build(run.application_spec, run.experience_spec, run.site_snapshot, renderer)
-        has_pending_approval = False
-        total_actions = max(1, len(run.build_plan.actions))
-        for index, action in enumerate(run.build_plan.actions, start=1):
-            pct = 50 + int((index - 1) / total_actions * 25)
-            await self._progress("building", pct, f"Executing {action.ability} ({index}/{total_actions})")
-            execution = await self._execute_action(run, action, AgentRole.BUILDER)
-            if execution.policy.outcome == PolicyOutcome.REQUIRE_APPROVAL:
-                has_pending_approval = True
+        has_pending_approval, batch_snapshot = await self._execute_actions_batched(
+            run, run.build_plan.actions, AgentRole.BUILDER, attempt=1, progress_start=50, progress_end=75
+        )
 
         run.status = "built"
         self._save(run)
 
-        await self._progress("verification", 78, "Inspecting the site after the build")
-        run.verification_snapshot = await self._inspect_site(run, AgentRole.QUALITY)
+        await self._progress("verification", 78, "Using the post-build snapshot returned by the final WordPress batch")
+        # The Bridge returns a snapshot inside the final execution batch. Avoid an
+        # immediate extra inbound REST request, which is exactly what EasyWP's
+        # Anti-DDoS layer was rate-limiting in v0.5.3.
+        run.verification_snapshot = batch_snapshot or run.site_snapshot
         await self._progress("quality", 86, "Quality & Security agent is evaluating the result")
         report = await self.agents.quality(
             run.application_spec,
@@ -151,13 +250,19 @@ class MultiAgentWorkflow:
             )
             if not repair_plan.actions:
                 break
-            for action in repair_plan.actions:
-                execution = await self._execute_action(run, action, AgentRole.BUILDER, attempt=repair_loop + 1)
-                if execution.policy.outcome == PolicyOutcome.REQUIRE_APPROVAL:
-                    has_pending_approval = True
+            repair_pending, repair_snapshot = await self._execute_actions_batched(
+                run,
+                repair_plan.actions,
+                AgentRole.BUILDER,
+                attempt=repair_loop + 1,
+                progress_start=min(92, 88 + repair_loop * 2),
+                progress_end=min(96, 92 + repair_loop * 2),
+            )
+            has_pending_approval = has_pending_approval or repair_pending
             if has_pending_approval:
                 break
-            run.verification_snapshot = await self._inspect_site(run, AgentRole.QUALITY)
+            if repair_snapshot is not None:
+                run.verification_snapshot = repair_snapshot
             report = await self.agents.quality(
                 run.application_spec,
                 run.experience_spec,

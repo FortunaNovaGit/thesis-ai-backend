@@ -474,6 +474,18 @@ final class Thesis_AI_Bridge {
                 ],
             ],
         ]);
+
+        // Managed-hosting friendly batch endpoint. The backend still applies its
+        // Policy Engine per logical action; WordPress independently re-checks
+        // permissions per action before executing anything. One HTTP request can
+        // therefore safely carry several local WordPress operations.
+        register_rest_route('thesis-ai/v1', '/batch', [
+            'methods' => WP_REST_Server::CREATABLE,
+            'callback' => [self::class, 'fallback_rest_batch'],
+            'permission_callback' => static fn(): bool|WP_Error => self::external_api_enabled()
+                ? (self::can_use_bridge() ? true : new WP_Error('thesis_ai_forbidden', __('Bridge access denied.', 'thesis-ai-bridge'), ['status' => 403]))
+                : new WP_Error('thesis_ai_api_disabled', __('External Bridge API is disabled.', 'thesis-ai-bridge'), ['status' => 403]),
+        ]);
     }
 
     public static function fallback_rest_permission(WP_REST_Request $request): bool|WP_Error {
@@ -483,16 +495,71 @@ final class Thesis_AI_Bridge {
 
         $ability = sanitize_key((string)$request['ability']);
         $input = self::request_input($request);
+        return self::permission_for_ability($ability, $input);
+    }
 
-        return match ($ability) {
+    private static function permission_for_ability(string $ability, array $input): bool|WP_Error {
+        $allowed = match ($ability) {
             'get-site-snapshot', 'get-site-info', 'list-pages', 'get-page', 'list-plugins', 'list-themes', 'inspect-capabilities', 'get-approved-plugin-info', 'elementor-get-status', 'elementor-get-page', 'get-site-structure' => self::can_use_bridge(),
             'create-draft-page', 'ensure-draft-page', 'elementor-ensure-draft-page' => self::can_write_pages(),
             'update-page' => self::can_update_page((int)($input['page_id'] ?? 0)),
             'set-homepage', 'set-homepage-by-slug', 'update-site-identity', 'ensure-navigation-menu', 'set-page-seo' => self::can_manage_site(),
             'install-approved-plugin', 'activate-approved-plugin', 'deactivate-approved-plugin', 'ensure-approved-plugin', 'ensure-contact-form' => self::can_manage_plugins(),
             'ensure-approved-theme' => self::can_manage_plugins() && self::can_manage_site(),
-            default => new WP_Error('thesis_ai_unknown_ability', __('Unknown bridge ability.', 'thesis-ai-bridge'), ['status' => 404]),
+            default => null,
         };
+        if ($allowed === null) {
+            return new WP_Error('thesis_ai_unknown_ability', __('Unknown bridge ability.', 'thesis-ai-bridge'), ['status' => 404]);
+        }
+        if (!$allowed) {
+            return new WP_Error('thesis_ai_forbidden', __('This Bridge ability is not permitted for the current service user/settings.', 'thesis-ai-bridge'), ['status' => 403]);
+        }
+        return true;
+    }
+
+    public static function fallback_rest_batch(WP_REST_Request $request): WP_REST_Response|WP_Error {
+        $json = $request->get_json_params();
+        $actions = is_array($json) && isset($json['actions']) && is_array($json['actions']) ? $json['actions'] : [];
+        $include_snapshot = !is_array($json) || !array_key_exists('include_snapshot', $json) || !empty($json['include_snapshot']);
+        if (!$actions) {
+            return new WP_Error('thesis_ai_empty_batch', __('The execution batch is empty.', 'thesis-ai-bridge'), ['status' => 400]);
+        }
+        if (count($actions) > 12) {
+            return new WP_Error('thesis_ai_batch_too_large', __('A Bridge batch may contain at most 12 actions.', 'thesis-ai-bridge'), ['status' => 400]);
+        }
+
+        $results = [];
+        foreach (array_values($actions) as $index => $item) {
+            if (!is_array($item)) {
+                $results[] = ['index' => $index, 'ability' => '', 'ok' => false, 'error' => 'Invalid batch action payload.'];
+                continue;
+            }
+            $ability = sanitize_key((string)($item['ability'] ?? ''));
+            $input = isset($item['input']) && is_array($item['input']) ? $item['input'] : [];
+            $permission = self::permission_for_ability($ability, $input);
+            if (is_wp_error($permission)) {
+                $results[] = [
+                    'index' => $index, 'ability' => $ability, 'ok' => false,
+                    'error' => $permission->get_error_message(), 'error_code' => $permission->get_error_code(),
+                ];
+                continue;
+            }
+            $result = self::execute_named_ability($ability, $input);
+            if (is_wp_error($result)) {
+                $results[] = [
+                    'index' => $index, 'ability' => $ability, 'ok' => false,
+                    'error' => $result->get_error_message(), 'error_code' => $result->get_error_code(),
+                ];
+                continue;
+            }
+            $results[] = ['index' => $index, 'ability' => $ability, 'ok' => true, 'result' => $result];
+        }
+
+        return rest_ensure_response([
+            'results' => $results,
+            'snapshot' => $include_snapshot ? self::do_get_site_snapshot() : null,
+            'bridge_version' => THESIS_AI_BRIDGE_VERSION,
+        ]);
     }
 
     public static function fallback_rest_run(WP_REST_Request $request): WP_REST_Response|WP_Error {

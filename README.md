@@ -121,3 +121,7 @@ For the current test deployment the job registry is in process memory. Do not re
 ## EasyWP / managed hosting rate limiting (v0.5.3)
 
 v0.5.3 avoids bursty WordPress REST traffic by using a composite `get-site-snapshot` ability, request pacing, and adaptive 429 retries. The backend honors `Retry-After` when present and otherwise uses exponential backoff with jitter. A 429 is retried on the same canonical route and does not immediately trigger the alternate REST URL.
+
+## EasyWP batch transport (v0.5.4)
+
+v0.5.4 changes the remote execution pattern from one HTTP request per logical WordPress action to small, permission-checked batches. The Bridge exposes `POST /thesis-ai/v1/batch`; the backend still policy-checks every action before batching, and the Bridge independently checks WordPress permissions before local execution. The final batch can return a fresh site snapshot, avoiding an immediate verification request.

@@ -20,6 +20,28 @@ class WordPressExecutor(ABC):
     async def execute(self, action: BuildAction) -> Any:
         raise NotImplementedError
 
+    async def execute_batch(self, actions: list[BuildAction], *, include_snapshot: bool = True) -> dict[str, Any]:
+        """Execute a group of already-policy-approved actions.
+
+        Mock/default executors run locally in sequence. Remote executors override this
+        with one Bridge REST request so managed-hosting firewalls see a tiny number of
+        inbound requests rather than one request per WordPress action.
+        """
+        results: list[dict[str, Any]] = []
+        for index, action in enumerate(actions):
+            try:
+                result = await self.execute(action)
+                results.append({"index": index, "ability": action.ability, "ok": True, "result": result})
+            except Exception as exc:
+                results.append({"index": index, "ability": action.ability, "ok": False, "error": str(exc)})
+        snapshot = None
+        if include_snapshot:
+            try:
+                snapshot = await self.execute(BuildAction(ability="thesis-ai-bridge/get-site-snapshot", rationale="Post-batch snapshot"))
+            except Exception:
+                snapshot = None
+        return {"results": results, "snapshot": snapshot}
+
     async def _wait_for_slot(self) -> None:
         """Serialize outbound WordPress requests and keep a small gap between them.
 
@@ -53,18 +75,7 @@ class WordPressExecutor(ABC):
         return min(self.rate_limit_max_delay, base + random.uniform(0.0, min(1.5, base * 0.15)))
 
     async def _send_with_rate_limit(self, method: str, url: str, *, params=None, json_body=None) -> httpx.Response:
-        last: httpx.Response | None = None
-        for retry in range(self.rate_limit_retries + 1):
-            await self._wait_for_slot()
-            response = await self._send_with_rate_limit(method, url, params=params, json_body=json_body)
-            last = response
-            if response.status_code != 429:
-                return response
-            if retry >= self.rate_limit_retries:
-                return response
-            await asyncio.sleep(self._retry_after_seconds(response, retry))
-        assert last is not None
-        return last
+        raise NotImplementedError
 
     async def probe(self) -> dict[str, Any]:
         return {"mode": "unknown", "status": "probe-not-supported"}
@@ -130,13 +141,13 @@ class MockWordPressExecutor(WordPressExecutor):
         return last
 
     async def probe(self) -> dict[str, Any]:
-        return {"mode": "mock", "status": "ok", "bridge_version": "0.5.3-mock", "native_abilities_api": True}
+        return {"mode": "mock", "status": "ok", "bridge_version": "0.5.4-mock", "native_abilities_api": True}
 
     async def execute(self, action: BuildAction) -> Any:
         ability, p = action.ability, action.parameters
         if ability == "thesis-ai-bridge/get-site-info":
             active_theme = next((t for t in self.themes.values() if t.get("active")), {"slug":"", "name":"", "version":""})
-            return {"name": self.site_title, "tagline": self.tagline, "url": "http://mock.local", "wordpress_version": "7.x", "php_version": "8.x", "theme": active_theme.get("name",""), "theme_slug": active_theme.get("slug",""), "theme_version": active_theme.get("version",""), "is_block_theme": False, "permalink_structure": "/%postname%/", "https": False, "multisite": False, "native_abilities_api": True, "bridge_version": "0.5.3-mock"}
+            return {"name": self.site_title, "tagline": self.tagline, "url": "http://mock.local", "wordpress_version": "7.x", "php_version": "8.x", "theme": active_theme.get("name",""), "theme_slug": active_theme.get("slug",""), "theme_version": active_theme.get("version",""), "is_block_theme": False, "permalink_structure": "/%postname%/", "https": False, "multisite": False, "native_abilities_api": True, "bridge_version": "0.5.4-mock"}
         if ability == "thesis-ai-bridge/get-site-snapshot":
             site_info = await self.execute(BuildAction(ability="thesis-ai-bridge/get-site-info", rationale="mock snapshot"))
             plugins = await self.execute(BuildAction(ability="thesis-ai-bridge/list-plugins", rationale="mock snapshot"))
@@ -323,7 +334,7 @@ class RemoteWordPressExecutor(WordPressExecutor):
             auth=self.auth,
             timeout=self.timeout,
             verify=self.verify,
-            headers={"User-Agent": "Thesis-AI-Backend/0.5.3", "Accept": "application/json"},
+            headers={"User-Agent": "Thesis-AI-Backend/0.5.4", "Accept": "application/json"},
             follow_redirects=True,
         )
 
@@ -374,6 +385,27 @@ class RemoteWordPressExecutor(WordPressExecutor):
         assert last is not None
         return last
 
+    async def execute_batch(self, actions: list[BuildAction], *, include_snapshot: bool = True) -> dict[str, Any]:
+        if not actions:
+            return {"results": [], "snapshot": None}
+        payload = {
+            "actions": [
+                {"ability": action.ability.split("/", 1)[1], "input": action.parameters}
+                for action in actions
+            ],
+            "include_snapshot": bool(include_snapshot),
+        }
+        candidates = [
+            (f"{self.base}/wp-json/thesis-ai/v1/batch/", None),
+            (f"{self.base}/", {"rest_route": "/thesis-ai/v1/batch"}),
+        ]
+        data = await self._request_json_candidates(
+            "POST", candidates, context="Bridge batch execution", json_body=payload
+        )
+        if not isinstance(data, dict) or not isinstance(data.get("results"), list):
+            raise RuntimeError("Bridge batch execution returned an unexpected payload")
+        return data
+
     async def probe(self) -> dict[str, Any]:
         if self._probe_cache is not None:
             return self._probe_cache
@@ -398,8 +430,7 @@ class RemoteWordPressExecutor(WordPressExecutor):
     ) -> Any:
         diagnostics: list[str] = []
         for url, params in candidates:
-            async with self._client() as client:
-                response = await client.request(method, url, params=params, json=json_body)
+            response = await self._send_with_rate_limit(method, url, params=params, json_body=json_body)
 
             body = response.text or ""
             if response.status_code in {401, 403}:

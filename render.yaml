@@ -17,13 +17,17 @@ services:
       - key: AUTO_APPROVE_MEDIUM_RISK
         value: "true"
       - key: WORDPRESS_MIN_REQUEST_INTERVAL_SECONDS
-        value: "1.0"
+        value: "2.0"
       - key: WORDPRESS_RATE_LIMIT_RETRIES
-        value: "5"
+        value: "2"
       - key: WORDPRESS_RATE_LIMIT_BASE_DELAY_SECONDS
-        value: "3.0"
+        value: "180.0"
       - key: WORDPRESS_RATE_LIMIT_MAX_DELAY_SECONDS
-        value: "45.0"
+        value: "300.0"
+      - key: WORDPRESS_BATCH_SIZE
+        value: "8"
+      - key: WORDPRESS_INTER_BATCH_DELAY_SECONDS
+        value: "3.0"
       - key: ALLOW_INSECURE_WORDPRESS
         value: "false"
       - key: ALLOW_PRIVATE_WORDPRESS

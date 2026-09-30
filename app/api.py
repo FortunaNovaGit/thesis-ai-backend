@@ -19,10 +19,10 @@ from .tools.wordpress import RemoteWordPressExecutor, make_wordpress_executor
 from .workflow import MultiAgentWorkflow
 
 
-app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.5.3")
+app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.5.4")
 codec = ConnectionTokenCodec(settings.backend_token_secret, Path(settings.backend_key_file))
 
-# v0.5.3 test queue: long builds run outside the request that starts them.
+# v0.5.4 test queue: long builds run outside the request that starts them.
 # This avoids WordPress/hosting gateway timeouts while keeping the current
 # single Render web service architecture. PostgreSQL/Redis durability can be
 # added later without changing the WordPress-facing API.
@@ -200,7 +200,7 @@ def _result_summary(run) -> dict[str, Any]:
 async def health() -> dict[str, Any]:
     return {
         "status": "ok",
-        "version": "0.5.3",
+        "version": "0.5.4",
         "agent_mode": settings.resolved_agent_mode,
         "configured_agent_mode": settings.agent_mode,
         "model": settings.openai_model if settings.resolved_agent_mode == "openai" else "mock",

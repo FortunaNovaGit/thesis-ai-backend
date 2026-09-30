@@ -26,10 +26,14 @@ class Settings(BaseSettings):
     transient_action_retries: int = 1
 
     # EasyWP/managed-hosting friendly HTTP pacing and adaptive 429 handling.
-    wordpress_min_request_interval_seconds: float = 1.0
-    wordpress_rate_limit_retries: int = 5
-    wordpress_rate_limit_base_delay_seconds: float = 3.0
-    wordpress_rate_limit_max_delay_seconds: float = 45.0
+    wordpress_min_request_interval_seconds: float = 2.0
+    wordpress_rate_limit_retries: int = 2
+    wordpress_rate_limit_base_delay_seconds: float = 180.0
+    wordpress_rate_limit_max_delay_seconds: float = 300.0
+    # Batch multiple logical WordPress actions into one REST request. This is the
+    # primary EasyWP anti-rate-limit strategy in v0.5.4.
+    wordpress_batch_size: int = 8
+    wordpress_inter_batch_delay_seconds: float = 3.0
 
     # Stable secret for self-contained encrypted WordPress connection tokens.
     # Configure once in Render. Redeploys then do not invalidate connected sites.
