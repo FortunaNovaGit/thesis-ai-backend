@@ -1,6 +1,6 @@
 [project]
 name = "wp-multiagent-thesis"
-version = "0.5.0"
+version = "0.5.3"
 description = "Five-agent WordPress/Elementor site builder prototype for a master's thesis"
 requires-python = ">=3.11"
 dependencies = [

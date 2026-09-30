@@ -1,4 +1,4 @@
-# Quick Start — v0.5.2
+# Quick Start — v0.5.3
 
 ## 1. Оновити backend у GitHub
 
@@ -33,7 +33,7 @@ ALLOW_PRIVATE_WORDPRESS=false
 ```json
 {
   "status": "ok",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "agent_mode": "openai",
   "stable_connection_tokens": true
 }
@@ -43,7 +43,7 @@ ALLOW_PRIVATE_WORDPRESS=false
 
 ## 3. Оновити WordPress plugin
 
-Upload `thesis-ai-bridge-v0.5.2.zip` поверх поточної версії.
+Upload `thesis-ai-bridge-v0.5.3.zip` поверх поточної версії.
 
 Після першого переходу на stable `BACKEND_TOKEN_SECRET` зробіть один раз:
 
@@ -77,3 +77,16 @@ Prompt:
 **Перевірив — опублікувати AI-сторінки**
 
 Це human-in-the-loop publish: агенти самі сторінки не публікують.
+
+## Якщо EasyWP повертає 429
+
+Для v0.5.3 рекомендовано залишити:
+
+```text
+WORDPRESS_MIN_REQUEST_INTERVAL_SECONDS=1.0
+WORDPRESS_RATE_LIMIT_RETRIES=5
+WORDPRESS_RATE_LIMIT_BASE_DELAY_SECONDS=3.0
+WORDPRESS_RATE_LIMIT_MAX_DELAY_SECONDS=45.0
+```
+
+Якщо firewall все ще спрацьовує, змініть `WORDPRESS_MIN_REQUEST_INTERVAL_SECONDS` на `1.5` або `2.0` у Render Environment.

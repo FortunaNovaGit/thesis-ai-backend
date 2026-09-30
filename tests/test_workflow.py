@@ -19,7 +19,7 @@ def test_mock_workflow_passes(tmp_path: Path):
     assert any(x.executed for x in result.executions)
     assert any(x.action.ability == "thesis-ai-bridge/elementor-ensure-draft-page" for x in result.executions)
     assert result.site_snapshot is not None
-    assert any(x.action.ability == "thesis-ai-bridge/list-plugins" for x in result.executions)
+    assert any(x.action.ability == "thesis-ai-bridge/get-site-snapshot" for x in result.executions)
 
 
 def test_ensure_draft_page_is_rerunnable():

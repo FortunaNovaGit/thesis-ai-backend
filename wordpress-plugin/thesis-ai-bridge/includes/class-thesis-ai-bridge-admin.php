@@ -17,6 +17,7 @@ final class Thesis_AI_Bridge_Admin {
         add_action('admin_post_thesis_ai_disconnect', [self::class, 'disconnect']);
         add_action('admin_post_thesis_ai_check', [self::class, 'check']);
         add_action('admin_post_thesis_ai_build', [self::class, 'build']);
+        add_action('wp_ajax_thesis_ai_build_status', [self::class, 'build_status']);
         add_action('admin_post_thesis_ai_demo_build', [self::class, 'demo_build']);
         add_action('admin_post_thesis_ai_publish_build', [self::class, 'publish_build']);
         add_action('admin_notices', [self::class, 'abilities_notice']);
@@ -93,8 +94,21 @@ final class Thesis_AI_Bridge_Admin {
         $settings['plugin_management_enabled'] = !empty($_POST['allow_approved_plugins']);
         $settings['site_settings_enabled'] = !empty($_POST['allow_site_setup']);
         update_option(self::OPTION_SETTINGS, Thesis_AI_Bridge::sanitize_settings($settings), false);
-        $result = Thesis_AI_Cloud::build($prompt, $renderer);
+        $result = Thesis_AI_Cloud::start_build($prompt, $renderer);
         self::redirect_with_result('build', $result);
+    }
+
+
+    public static function build_status(): void {
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => __('Insufficient permissions.', 'thesis-ai-bridge')], 403);
+        }
+        check_ajax_referer('thesis_ai_build_status', 'nonce');
+        $result = Thesis_AI_Cloud::poll_build();
+        if (is_wp_error($result)) {
+            wp_send_json_error(['message' => $result->get_error_message()], 500);
+        }
+        wp_send_json_success($result);
     }
 
     public static function demo_build(): void {
@@ -117,6 +131,7 @@ final class Thesis_AI_Bridge_Admin {
         $connected = Thesis_AI_Cloud::is_connected();
         $connection = Thesis_AI_Cloud::connection();
         $last_build = Thesis_AI_Cloud::last_build();
+        $active_build = Thesis_AI_Cloud::active_build();
         $settings = Thesis_AI_Bridge::get_settings();
         $status = Thesis_AI_Bridge::status_payload();
         $backend_url = (string)get_option(self::OPTION_BACKEND_URL, defined('THESIS_AI_CLOUD_URL') ? (string)THESIS_AI_CLOUD_URL : '');
@@ -125,7 +140,7 @@ final class Thesis_AI_Bridge_Admin {
         ?>
         <div class="wrap thesis-ai-wrap">
             <style>
-                .thesis-ai-wrap{max-width:1100px}.thesis-ai-hero{background:#fff;border:1px solid #dcdcde;border-radius:10px;padding:24px;margin:18px 0}.thesis-ai-status{display:inline-flex;align-items:center;gap:8px;font-weight:600}.thesis-ai-dot{width:10px;height:10px;border-radius:50%;background:#b32d2e}.thesis-ai-dot.on{background:#00a32a}.thesis-ai-grid{display:grid;grid-template-columns:2fr 1fr;gap:20px}.thesis-ai-card{background:#fff;border:1px solid #dcdcde;border-radius:10px;padding:20px}.thesis-ai-card h2{margin-top:0}.thesis-ai-prompt{width:100%;min-height:150px;font-size:16px;padding:12px}.thesis-ai-muted{color:#646970}.thesis-ai-result ul{margin-left:20px;list-style:disc}.thesis-ai-chip{display:inline-block;background:#f0f0f1;border-radius:999px;padding:5px 9px;margin:2px;font-size:12px}@media(max-width:800px){.thesis-ai-grid{grid-template-columns:1fr}}
+                .thesis-ai-wrap{max-width:1100px}.thesis-ai-hero{background:#fff;border:1px solid #dcdcde;border-radius:10px;padding:24px;margin:18px 0}.thesis-ai-status{display:inline-flex;align-items:center;gap:8px;font-weight:600}.thesis-ai-dot{width:10px;height:10px;border-radius:50%;background:#b32d2e}.thesis-ai-dot.on{background:#00a32a}.thesis-ai-grid{display:grid;grid-template-columns:2fr 1fr;gap:20px}.thesis-ai-card{background:#fff;border:1px solid #dcdcde;border-radius:10px;padding:20px}.thesis-ai-card h2{margin-top:0}.thesis-ai-prompt{width:100%;min-height:150px;font-size:16px;padding:12px}.thesis-ai-muted{color:#646970}.thesis-ai-result ul{margin-left:20px;list-style:disc}.thesis-ai-chip{display:inline-block;background:#f0f0f1;border-radius:999px;padding:5px 9px;margin:2px;font-size:12px}.thesis-ai-progress{height:12px;background:#f0f0f1;border-radius:999px;overflow:hidden}.thesis-ai-progress>span{display:block;height:100%;background:#3858e9;width:0;transition:width .35s ease}.thesis-ai-running{border-left:4px solid #3858e9}@media(max-width:800px){.thesis-ai-grid{grid-template-columns:1fr}}
             </style>
             <h1><?php echo esc_html__('AI Website Builder', 'thesis-ai-bridge'); ?></h1>
             <p class="thesis-ai-muted"><?php echo esc_html__('Опиши сайт — п’ять спеціалізованих агентів спланують, побудують і перевірять WordPress-версію через контрольований Bridge.', 'thesis-ai-bridge'); ?></p>
@@ -168,7 +183,7 @@ final class Thesis_AI_Bridge_Admin {
                             <p><label><input type="checkbox" name="allow_site_setup" value="1" checked> <strong><?php echo esc_html__('Автоматично налаштувати тему, назву сайту, меню, SEO та головну сторінку', 'thesis-ai-bridge'); ?></strong></label><br><span class="description"><?php echo esc_html__('Для Elementor система може встановити approved Hello Elementor theme. Сторінки все одно залишаються draft.', 'thesis-ai-bridge'); ?></span></p>
                         <?php endif; ?>
                         <p class="description"><?php echo $connected ? esc_html__('Буде виконано preflight сайту, capability resolution і 5-агентний workflow. Сторінки залишаються draft і не публікуються автоматично.', 'thesis-ai-bridge') : esc_html__('Backend ще не підключений, тому кнопка запустить локальне демо execution layer. Воно НЕ є запуском п’яти AI-агентів.', 'thesis-ai-bridge'); ?></p>
-                        <?php submit_button($connected ? __('Створити сайт', 'thesis-ai-bridge') : __('Спробувати локальне демо', 'thesis-ai-bridge'), $connected ? 'primary' : 'secondary', 'submit', false); ?>
+                        <?php submit_button($connected ? (!empty($active_build['job_id']) ? __('Build уже виконується…', 'thesis-ai-bridge') : __('Створити сайт', 'thesis-ai-bridge')) : __('Спробувати локальне демо', 'thesis-ai-bridge'), $connected ? 'primary' : 'secondary', 'submit', false, !empty($active_build['job_id']) ? ['disabled' => 'disabled'] : []); ?>
                     </form>
                 </div>
                 <div class="thesis-ai-card">
@@ -177,6 +192,53 @@ final class Thesis_AI_Bridge_Admin {
                     <p class="thesis-ai-muted"><?php echo esc_html__('Builder не отримує SSH, raw SQL або shell. Невідомі abilities блокуються за принципом default deny.', 'thesis-ai-bridge'); ?></p>
                 </div>
             </div>
+
+            <?php if (!empty($active_build['job_id'])) : ?>
+                <div class="thesis-ai-card thesis-ai-running" id="thesis-ai-build-progress" style="margin-top:20px">
+                    <h2><?php echo esc_html__('Build виконується у фоні', 'thesis-ai-bridge'); ?></h2>
+                    <p><strong id="thesis-ai-build-stage"><?php echo esc_html((string)($active_build['stage'] ?? 'queued')); ?></strong> — <span id="thesis-ai-build-detail"><?php echo esc_html((string)($active_build['detail'] ?? '')); ?></span></p>
+                    <div class="thesis-ai-progress" aria-label="Build progress"><span id="thesis-ai-progress-bar" style="width:<?php echo esc_attr((string)((int)($active_build['progress'] ?? 0))); ?>%"></span></div>
+                    <p class="thesis-ai-muted"><span id="thesis-ai-progress-number"><?php echo esc_html((string)((int)($active_build['progress'] ?? 0))); ?></span>% · <?php echo esc_html__('Цю сторінку можна залишити відкритою або повернутися пізніше. WordPress більше не тримає один довгий PHP-запит.', 'thesis-ai-bridge'); ?></p>
+                    <p id="thesis-ai-build-error" style="color:#b32d2e"></p>
+                </div>
+                <script>
+                (function(){
+                    const ajaxUrl = <?php echo wp_json_encode(admin_url('admin-ajax.php')); ?>;
+                    const nonce = <?php echo wp_json_encode(wp_create_nonce('thesis_ai_build_status')); ?>;
+                    let stopped = false;
+                    async function poll(){
+                        if(stopped) return;
+                        try {
+                            const body = new URLSearchParams({action:'thesis_ai_build_status', nonce:nonce});
+                            const response = await fetch(ajaxUrl, {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'}, body:body.toString()});
+                            const json = await response.json();
+                            if(!json.success){
+                                stopped = true;
+                                document.getElementById('thesis-ai-build-error').textContent = (json.data && json.data.message) ? json.data.message : 'Build status check failed.';
+                                return;
+                            }
+                            const data = json.data || {};
+                            const progress = Math.max(0, Math.min(100, parseInt(data.progress || 0, 10)));
+                            document.getElementById('thesis-ai-progress-bar').style.width = progress + '%';
+                            document.getElementById('thesis-ai-progress-number').textContent = progress;
+                            document.getElementById('thesis-ai-build-stage').textContent = data.stage || data.status || 'running';
+                            document.getElementById('thesis-ai-build-detail').textContent = data.detail || '';
+                            document.getElementById('thesis-ai-build-error').textContent = '';
+                            if(data.reload || data.status === 'completed'){
+                                stopped = true;
+                                window.location.reload();
+                                return;
+                            }
+                            setTimeout(poll, 3000);
+                        } catch(e) {
+                            document.getElementById('thesis-ai-build-error').textContent = 'Status polling error: ' + e.message;
+                            setTimeout(poll, 5000);
+                        }
+                    }
+                    setTimeout(poll, 1000);
+                })();
+                </script>
+            <?php endif; ?>
 
             <?php if ($last_build) : self::render_last_build($last_build); endif; ?>
 
@@ -215,6 +277,7 @@ final class Thesis_AI_Bridge_Admin {
         $themes = isset($build['themes']) && is_array($build['themes']) ? $build['themes'] : [];
         $site_setup = isset($build['site_setup']) && is_array($build['site_setup']) ? $build['site_setup'] : [];
         $usage = isset($build['usage']) && is_array($build['usage']) ? $build['usage'] : [];
+        $failed_actions = isset($build['failed_actions']) && is_array($build['failed_actions']) ? $build['failed_actions'] : [];
         ?>
         <div class="thesis-ai-card thesis-ai-result" style="margin-top:20px">
             <h2><?php echo esc_html__('Останній результат', 'thesis-ai-bridge'); ?></h2>
@@ -227,6 +290,22 @@ final class Thesis_AI_Bridge_Admin {
             <?php if (!empty($build['agent_mode'])) : ?><p><strong><?php echo esc_html__('Режим агентів:', 'thesis-ai-bridge'); ?></strong> <?php echo esc_html((string)$build['agent_mode']); ?><?php if (!empty($build['model'])) : ?> — <code><?php echo esc_html((string)$build['model']); ?></code><?php endif; ?></p><?php endif; ?>
             <?php if ($usage) : ?><p><strong><?php echo esc_html__('LLM usage:', 'thesis-ai-bridge'); ?></strong> <?php echo esc_html((string)($usage['total_tokens'] ?? 0)); ?> tokens / <?php echo esc_html((string)($usage['requests'] ?? 0)); ?> requests. <?php echo esc_html__('Repair loops:', 'thesis-ai-bridge'); ?> <?php echo esc_html((string)($build['repair_attempts'] ?? 0)); ?>.</p><?php endif; ?>
             <?php if ($issues) : ?><h3><?php echo esc_html__('Проблеми / наступні дії', 'thesis-ai-bridge'); ?></h3><ul><?php foreach ($issues as $issue) : ?><li><strong><?php echo esc_html((string)($issue['severity'] ?? '')); ?></strong>: <?php echo esc_html((string)($issue['description'] ?? '')); ?></li><?php endforeach; ?></ul><?php endif; ?>
+            <?php if ($failed_actions) : ?>
+                <h3><?php echo esc_html__('Невиконані дії — точна діагностика', 'thesis-ai-bridge'); ?></h3>
+                <p class="description"><?php echo esc_html__('Показано останній стан кожної логічної дії; старі невдалі спроби після успішного repair не дублюються.', 'thesis-ai-bridge'); ?></p>
+                <ul>
+                    <?php foreach ($failed_actions as $failed) : ?>
+                        <li style="margin-bottom:10px">
+                            <code><?php echo esc_html((string)($failed['ability'] ?? 'unknown')); ?></code>
+                            <?php if (!empty($failed['parameters']['slug'])) : ?> — <strong><?php echo esc_html((string)$failed['parameters']['slug']); ?></strong><?php endif; ?>
+                            <?php if (!empty($failed['parameters']['plugin_slug'])) : ?> — <strong><?php echo esc_html((string)$failed['parameters']['plugin_slug']); ?></strong><?php endif; ?>
+                            <br><strong><?php echo esc_html__('Помилка:', 'thesis-ai-bridge'); ?></strong> <?php echo esc_html((string)($failed['error'] ?? 'Unknown execution error')); ?>
+                            <?php if (!empty($failed['policy_reason'])) : ?><br><span class="description"><?php echo esc_html((string)$failed['policy_reason']); ?></span><?php endif; ?>
+                            <?php if (!empty($failed['attempt'])) : ?><br><span class="description"><?php echo esc_html__('Спроба:', 'thesis-ai-bridge'); ?> <?php echo esc_html((string)$failed['attempt']); ?></span><?php endif; ?>
+                        </li>
+                    <?php endforeach; ?>
+                </ul>
+            <?php endif; ?>
             <?php if (($build['status'] ?? '') === 'passed' && empty($build['published_at']) && $pages) : ?>
                 <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-top:16px" onsubmit="return confirm('<?php echo esc_js(__('Опублікувати всі AI-generated draft-сторінки з останнього успішного build?', 'thesis-ai-bridge')); ?>');">
                     <input type="hidden" name="action" value="thesis_ai_publish_build">
@@ -257,7 +336,7 @@ final class Thesis_AI_Bridge_Admin {
                 'connect' => __('AI Builder підключено. Тепер можна описати сайт і запустити build.', 'thesis-ai-bridge'),
                 'disconnect' => __('AI Builder відключено, а Application Password відкликано.', 'thesis-ai-bridge'),
                 'check' => __('З’єднання з backend і WordPress Bridge працює.', 'thesis-ai-bridge'),
-                'build' => __('Multi-agent build завершив поточний цикл. Результат показано нижче.', 'thesis-ai-bridge'),
+                'build' => __('Build запущено у фоні. Прогрес показано нижче; сторінку більше не потрібно тримати в одному довгому запиті.', 'thesis-ai-bridge'),
                 'demo' => __('Локальне демо завершено. Створено лише безпечні draft-сторінки.', 'thesis-ai-bridge'),
                 'publish' => __('AI-generated сторінки опубліковано після вашого явного підтвердження.', 'thesis-ai-bridge'),
             ];

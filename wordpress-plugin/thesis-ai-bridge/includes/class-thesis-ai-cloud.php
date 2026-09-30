@@ -9,6 +9,7 @@ if (!defined('ABSPATH')) {
 final class Thesis_AI_Cloud {
     private const OPTION_CONNECTION = 'thesis_ai_bridge_connection';
     private const OPTION_LAST_BUILD = 'thesis_ai_bridge_last_build';
+    private const OPTION_ACTIVE_BUILD = 'thesis_ai_bridge_active_build';
     private const USER_META_SERVICE = '_thesis_ai_service_user';
     private const USER_META_APP_UUID = '_thesis_ai_app_password_uuid';
 
@@ -38,6 +39,11 @@ final class Thesis_AI_Cloud {
 
     public static function last_build(): array {
         $value = get_option(self::OPTION_LAST_BUILD, []);
+        return is_array($value) ? $value : [];
+    }
+
+    public static function active_build(): array {
+        $value = get_option(self::OPTION_ACTIVE_BUILD, []);
         return is_array($value) ? $value : [];
     }
 
@@ -161,6 +167,7 @@ final class Thesis_AI_Cloud {
 
         self::revoke_local_application_password();
         delete_option(self::OPTION_CONNECTION);
+        delete_option(self::OPTION_ACTIVE_BUILD);
         return true;
     }
 
@@ -192,7 +199,7 @@ final class Thesis_AI_Cloud {
         return $body;
     }
 
-    public static function build(string $prompt, string $renderer = 'elementor'): array|WP_Error {
+    public static function start_build(string $prompt, string $renderer = 'elementor'): array|WP_Error {
         $prompt = trim(wp_strip_all_tags($prompt));
         if (self::string_length($prompt) < 10) {
             return new WP_Error('thesis_ai_prompt_short', __('Please describe the website in a little more detail.', 'thesis-ai-bridge'));
@@ -205,10 +212,15 @@ final class Thesis_AI_Cloud {
             return new WP_Error('thesis_ai_not_connected', __('Connect AI Builder before starting a real multi-agent build.', 'thesis-ai-bridge'));
         }
 
+        $active = self::active_build();
+        if (!empty($active['job_id']) && in_array((string)($active['status'] ?? ''), ['queued', 'running'], true)) {
+            return $active;
+        }
+
         $response = wp_remote_post(
-            untrailingslashit((string)$c['backend_url']) . '/v1/sites/' . rawurlencode((string)$c['site_id']) . '/build',
+            untrailingslashit((string)$c['backend_url']) . '/v1/sites/' . rawurlencode((string)$c['site_id']) . '/builds',
             [
-                'timeout' => 300,
+                'timeout' => 20,
                 'headers' => [
                     'Authorization' => 'Bearer ' . (string)$c['site_token'],
                     'Content-Type' => 'application/json',
@@ -219,17 +231,96 @@ final class Thesis_AI_Cloud {
             ]
         );
         if (is_wp_error($response)) {
-            return new WP_Error('thesis_ai_build_unreachable', sprintf(__('The AI backend did not finish the request: %s', 'thesis-ai-bridge'), $response->get_error_message()));
+            return new WP_Error('thesis_ai_build_unreachable', sprintf(__('Could not start the AI build: %s', 'thesis-ai-bridge'), $response->get_error_message()));
+        }
+        $code = (int)wp_remote_retrieve_response_code($response);
+        $body = json_decode((string)wp_remote_retrieve_body($response), true);
+        if ($code < 200 || $code >= 300 || !is_array($body) || empty($body['job_id'])) {
+            $detail = is_array($body) ? (string)($body['detail'] ?? 'Unknown backend error.') : 'Invalid backend response.';
+            return new WP_Error('thesis_ai_build_failed', $detail);
+        }
+        $active = [
+            'job_id' => sanitize_text_field((string)$body['job_id']),
+            'status' => sanitize_text_field((string)($body['status'] ?? 'queued')),
+            'stage' => sanitize_text_field((string)($body['stage'] ?? 'queued')),
+            'progress' => max(0, min(100, (int)($body['progress'] ?? 0))),
+            'detail' => sanitize_text_field((string)($body['detail'] ?? 'Build queued')),
+            'started_at' => gmdate('c'),
+        ];
+        update_option(self::OPTION_ACTIVE_BUILD, $active, false);
+        return $active;
+    }
+
+    public static function poll_build(): array|WP_Error {
+        $c = self::full_connection();
+        $active = self::active_build();
+        if (!self::is_connected()) {
+            return new WP_Error('thesis_ai_not_connected', __('AI Builder is not connected.', 'thesis-ai-bridge'));
+        }
+        if (empty($active['job_id'])) {
+            return new WP_Error('thesis_ai_no_active_build', __('There is no active build.', 'thesis-ai-bridge'));
+        }
+
+        $response = wp_remote_get(
+            untrailingslashit((string)$c['backend_url']) . '/v1/sites/' . rawurlencode((string)$c['site_id']) . '/builds/' . rawurlencode((string)$active['job_id']),
+            [
+                'timeout' => 20,
+                'headers' => [
+                    'Authorization' => 'Bearer ' . (string)$c['site_token'],
+                    'Accept' => 'application/json',
+                    'User-Agent' => 'Thesis-AI-Bridge/' . THESIS_AI_BRIDGE_VERSION,
+                ],
+            ]
+        );
+        if (is_wp_error($response)) {
+            return new WP_Error('thesis_ai_build_status_unreachable', sprintf(__('Could not check build status: %s', 'thesis-ai-bridge'), $response->get_error_message()));
         }
         $code = (int)wp_remote_retrieve_response_code($response);
         $body = json_decode((string)wp_remote_retrieve_body($response), true);
         if ($code < 200 || $code >= 300 || !is_array($body)) {
             $detail = is_array($body) ? (string)($body['detail'] ?? 'Unknown backend error.') : 'Invalid backend response.';
-            return new WP_Error('thesis_ai_build_failed', $detail);
+            if ($code === 404) {
+                delete_option(self::OPTION_ACTIVE_BUILD);
+                $detail = __('The background build job is no longer available (the backend may have restarted). Start the build again.', 'thesis-ai-bridge');
+            }
+            return new WP_Error('thesis_ai_build_status_failed', $detail);
         }
-        $body['requested_at'] = gmdate('c');
-        update_option(self::OPTION_LAST_BUILD, $body, false);
-        return $body;
+
+        $status = sanitize_text_field((string)($body['status'] ?? 'running'));
+        $active['status'] = $status;
+        $active['stage'] = sanitize_text_field((string)($body['stage'] ?? $status));
+        $active['progress'] = max(0, min(100, (int)($body['progress'] ?? 0)));
+        $active['detail'] = sanitize_text_field((string)($body['detail'] ?? ''));
+        update_option(self::OPTION_ACTIVE_BUILD, $active, false);
+
+        if ($status === 'completed' && isset($body['result']) && is_array($body['result'])) {
+            $result = $body['result'];
+            $result['requested_at'] = gmdate('c');
+            update_option(self::OPTION_LAST_BUILD, $result, false);
+            delete_option(self::OPTION_ACTIVE_BUILD);
+            return [
+                'status' => 'completed',
+                'progress' => 100,
+                'stage' => 'completed',
+                'detail' => sanitize_text_field((string)($body['detail'] ?? 'Build completed')),
+                'reload' => true,
+            ];
+        }
+
+        if ($status === 'failed') {
+            delete_option(self::OPTION_ACTIVE_BUILD);
+            return new WP_Error('thesis_ai_background_build_failed', sanitize_text_field((string)($body['error'] ?? $body['detail'] ?? 'Background build failed.')));
+        }
+
+        return $active;
+    }
+
+    /**
+     * Legacy synchronous method kept for callers outside the admin UI.
+     * The WordPress admin uses start_build() + polling to avoid gateway timeouts.
+     */
+    public static function build(string $prompt, string $renderer = 'elementor'): array|WP_Error {
+        return self::start_build($prompt, $renderer);
     }
 
     public static function publish_last_build(): array|WP_Error {

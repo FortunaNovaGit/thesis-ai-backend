@@ -62,27 +62,23 @@ class MultiAgentWorkflow:
         return execution
 
     async def _inspect_site(self, run: ProjectRun, actor: AgentRole = AgentRole.ARCHITECT) -> SiteSnapshot:
-        actions = [
-            BuildAction(ability="thesis-ai-bridge/get-site-info", rationale="Inspect WordPress environment"),
-            BuildAction(ability="thesis-ai-bridge/list-pages", rationale="Inspect existing pages"),
-            BuildAction(ability="thesis-ai-bridge/list-plugins", rationale="Inspect installed plugins"),
-            BuildAction(ability="thesis-ai-bridge/list-themes", rationale="Inspect installed themes"),
-            BuildAction(ability="thesis-ai-bridge/inspect-capabilities", rationale="Resolve recognized capabilities"),
-            BuildAction(ability="thesis-ai-bridge/get-site-structure", rationale="Inspect homepage/navigation/site structure"),
-        ]
-        results: dict[str, object] = {}
-        for action in actions:
-            execution = await self._execute_action(run, action, actor)
-            if not execution.executed:
-                raise RuntimeError(f"Site inspection failed for {action.ability}: {execution.error}")
-            results[action.ability] = execution.result
+        # One composite Bridge call replaces six back-to-back REST requests. This
+        # materially reduces managed-hosting firewall pressure during preflight,
+        # verification and repair loops.
+        action = BuildAction(ability="thesis-ai-bridge/get-site-snapshot", rationale="Inspect WordPress environment in one throttling-friendly request")
+        execution = await self._execute_action(run, action, actor)
+        if not execution.executed:
+            raise RuntimeError(f"Site inspection failed for {action.ability}: {execution.error}")
+        result = execution.result or {}
+        if not isinstance(result, dict):
+            raise RuntimeError("Site snapshot returned an unexpected payload")
         return SiteSnapshot(
-            site_info=results.get("thesis-ai-bridge/get-site-info") or {},
-            pages=results.get("thesis-ai-bridge/list-pages") or [],
-            plugins=results.get("thesis-ai-bridge/list-plugins") or [],
-            themes=results.get("thesis-ai-bridge/list-themes") or [],
-            capabilities=results.get("thesis-ai-bridge/inspect-capabilities") or {},
-            structure=results.get("thesis-ai-bridge/get-site-structure") or {},
+            site_info=result.get("site_info") or {},
+            pages=result.get("pages") or [],
+            plugins=result.get("plugins") or [],
+            themes=result.get("themes") or [],
+            capabilities=result.get("capabilities") or {},
+            structure=result.get("structure") or {},
         )
 
     def _executions_json(self, run: ProjectRun) -> str:

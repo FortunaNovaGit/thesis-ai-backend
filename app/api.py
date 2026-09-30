@@ -19,10 +19,10 @@ from .tools.wordpress import RemoteWordPressExecutor, make_wordpress_executor
 from .workflow import MultiAgentWorkflow
 
 
-app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.5.2")
+app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.5.3")
 codec = ConnectionTokenCodec(settings.backend_token_secret, Path(settings.backend_key_file))
 
-# v0.5.2 test queue: long builds run outside the request that starts them.
+# v0.5.3 test queue: long builds run outside the request that starts them.
 # This avoids WordPress/hosting gateway timeouts while keeping the current
 # single Render web service architecture. PostgreSQL/Redis durability can be
 # added later without changing the WordPress-facing API.
@@ -93,6 +93,22 @@ def _credentials(site_id: str, authorization: str | None):
         raise HTTPException(status_code=401, detail="Invalid or expired site token")
     return creds
 
+
+
+
+def _remote_executor(site_url: str, username: str, application_password: str) -> RemoteWordPressExecutor:
+    return RemoteWordPressExecutor.from_credentials(
+        site_url=site_url,
+        username=username,
+        application_password=application_password,
+        mode="bridge_rest",
+        verify_ssl=True,
+        timeout=settings.wordpress_timeout_seconds,
+        min_request_interval=settings.wordpress_min_request_interval_seconds,
+        rate_limit_retries=settings.wordpress_rate_limit_retries,
+        rate_limit_base_delay=settings.wordpress_rate_limit_base_delay_seconds,
+        rate_limit_max_delay=settings.wordpress_rate_limit_max_delay_seconds,
+    )
 
 def _result_summary(run) -> dict[str, Any]:
     pages: list[dict[str, Any]] = []
@@ -184,7 +200,7 @@ def _result_summary(run) -> dict[str, Any]:
 async def health() -> dict[str, Any]:
     return {
         "status": "ok",
-        "version": "0.5.2",
+        "version": "0.5.3",
         "agent_mode": settings.resolved_agent_mode,
         "configured_agent_mode": settings.agent_mode,
         "model": settings.openai_model if settings.resolved_agent_mode == "openai" else "mock",
@@ -195,7 +211,7 @@ async def health() -> dict[str, Any]:
 @app.post("/v1/sites/connect")
 async def connect_site(payload: ConnectRequest):
     site_url = _validate_site_url(payload.site_url)
-    executor = RemoteWordPressExecutor.from_credentials(site_url=site_url, username=payload.username, application_password=payload.application_password, mode="bridge_rest", verify_ssl=True, timeout=settings.wordpress_timeout_seconds)
+    executor = _remote_executor(site_url, payload.username, payload.application_password)
     try:
         probe = await executor.probe()
     except Exception as exc:
@@ -207,7 +223,7 @@ async def connect_site(payload: ConnectRequest):
 @app.get("/v1/sites/{site_id}/check")
 async def check_site(site_id: str, authorization: str | None = Header(default=None)):
     creds = _credentials(site_id, authorization)
-    executor = RemoteWordPressExecutor.from_credentials(site_url=creds.site_url, username=creds.username, application_password=creds.application_password, mode="bridge_rest", verify_ssl=True, timeout=settings.wordpress_timeout_seconds)
+    executor = _remote_executor(creds.site_url, creds.username, creds.application_password)
     return {"connected": True, "bridge": await executor.probe(), "agent_mode": settings.resolved_agent_mode, "stable_connection_tokens": codec.persistent}
 
 
@@ -223,14 +239,7 @@ async def _run_build_job(job_id: str, site_id: str, creds, payload: BuildRequest
             return
         current.update({"stage": stage, "progress": pct, "detail": detail, "updated_at": _utcnow()})
 
-    wordpress = RemoteWordPressExecutor.from_credentials(
-        site_url=creds.site_url,
-        username=creds.username,
-        application_password=creds.application_password,
-        mode="bridge_rest",
-        verify_ssl=True,
-        timeout=settings.wordpress_timeout_seconds,
-    )
+    wordpress = _remote_executor(creds.site_url, creds.username, creds.application_password)
     workflow = MultiAgentWorkflow(
         settings,
         make_agent_runtime(settings.resolved_agent_mode, settings.openai_model),
@@ -306,7 +315,7 @@ async def get_connected_site_build(site_id: str, job_id: str, authorization: str
 @app.post("/v1/sites/{site_id}/build")
 async def build_connected_site(site_id: str, payload: BuildRequest, authorization: str | None = Header(default=None)):
     creds = _credentials(site_id, authorization)
-    wordpress = RemoteWordPressExecutor.from_credentials(site_url=creds.site_url, username=creds.username, application_password=creds.application_password, mode="bridge_rest", verify_ssl=True, timeout=settings.wordpress_timeout_seconds)
+    wordpress = _remote_executor(creds.site_url, creds.username, creds.application_password)
     workflow = MultiAgentWorkflow(settings, make_agent_runtime(settings.resolved_agent_mode, settings.openai_model), wordpress)
     try:
         run = await workflow.run(payload.request, payload.renderer)

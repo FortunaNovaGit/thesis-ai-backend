@@ -201,6 +201,15 @@ final class Thesis_AI_Bridge {
                 'permission_callback' => static fn(): bool => self::can_use_bridge(),
                 'meta' => self::common_meta(true, false, true),
             ],
+            'get-site-snapshot' => [
+                'label' => __('Get site snapshot', 'thesis-ai-bridge'),
+                'description' => __('Returns site info, pages, plugins, themes, recognized capabilities and site structure in one request to reduce API bursts on managed hosting.', 'thesis-ai-bridge'),
+                'category' => self::CATEGORY,
+                'output_schema' => ['type' => 'object', 'additionalProperties' => true],
+                'execute_callback' => static fn(): array => self::execute_named_ability('get-site-snapshot', []),
+                'permission_callback' => static fn(): bool => self::can_use_bridge(),
+                'meta' => self::common_meta(true, false, true),
+            ],
             'list-pages' => [
                 'label' => __('List pages', 'thesis-ai-bridge'),
                 'description' => __('Lists pages so the builder can inspect the site and avoid duplicates.', 'thesis-ai-bridge'),
@@ -476,7 +485,7 @@ final class Thesis_AI_Bridge {
         $input = self::request_input($request);
 
         return match ($ability) {
-            'get-site-info', 'list-pages', 'get-page', 'list-plugins', 'list-themes', 'inspect-capabilities', 'get-approved-plugin-info', 'elementor-get-status', 'elementor-get-page', 'get-site-structure' => self::can_use_bridge(),
+            'get-site-snapshot', 'get-site-info', 'list-pages', 'get-page', 'list-plugins', 'list-themes', 'inspect-capabilities', 'get-approved-plugin-info', 'elementor-get-status', 'elementor-get-page', 'get-site-structure' => self::can_use_bridge(),
             'create-draft-page', 'ensure-draft-page', 'elementor-ensure-draft-page' => self::can_write_pages(),
             'update-page' => self::can_update_page((int)($input['page_id'] ?? 0)),
             'set-homepage', 'set-homepage-by-slug', 'update-site-identity', 'ensure-navigation-menu', 'set-page-seo' => self::can_manage_site(),
@@ -515,6 +524,7 @@ final class Thesis_AI_Bridge {
 
     public static function execute_named_ability(string $ability, array $input): array|WP_Error {
         $result = match ($ability) {
+            'get-site-snapshot' => self::do_get_site_snapshot(),
             'get-site-info' => self::do_get_site_info(),
             'list-pages' => self::do_list_pages(),
             'get-page' => self::do_get_page($input),
@@ -549,6 +559,18 @@ final class Thesis_AI_Bridge {
             self::audit($ability, 'success', $input);
         }
         return $result;
+    }
+
+    private static function do_get_site_snapshot(): array {
+        return [
+            'site_info' => self::do_get_site_info(),
+            'pages' => self::do_list_pages(),
+            'plugins' => self::do_list_plugins(),
+            'themes' => Thesis_AI_Site_Setup::list_themes(),
+            'capabilities' => self::do_inspect_capabilities(),
+            'structure' => Thesis_AI_Site_Setup::get_site_structure(),
+            'generated_at' => gmdate('c'),
+        ];
     }
 
     private static function do_get_site_info(): array {
@@ -649,6 +671,48 @@ final class Thesis_AI_Bridge {
         return self::page_summary((int)$post_id);
     }
 
+    /**
+     * Resolve an existing slug without getting stuck on drafts from previous test runs.
+     * AI-owned trashed pages are safe to restore to draft and reuse. Other users'
+     * content and published AI pages remain protected from automatic overwrite.
+     */
+    private static function safe_ai_draft_by_slug(string $slug): WP_Post|WP_Error|null {
+        $existing = get_page_by_path($slug, OBJECT, 'page');
+        if (!$existing instanceof WP_Post) {
+            return null;
+        }
+        $owned = (int)$existing->post_author === get_current_user_id();
+        if ($owned && $existing->post_status === 'draft') {
+            return $existing;
+        }
+        if ($owned && $existing->post_status === 'trash') {
+            wp_untrash_post((int)$existing->ID);
+            $restored = wp_update_post([
+                'ID' => (int)$existing->ID,
+                'post_status' => 'draft',
+                'post_name' => $slug,
+            ], true);
+            if (is_wp_error($restored)) {
+                return $restored;
+            }
+            clean_post_cache((int)$existing->ID);
+            $existing = get_post((int)$existing->ID);
+            if ($existing instanceof WP_Post) {
+                return $existing;
+            }
+        }
+        return new WP_Error(
+            'thesis_ai_page_conflict',
+            sprintf(
+                __('A page with slug "%1$s" already exists (status: %2$s, author: %3$d) and is not a safe AI-owned draft. Empty/restore the conflicting page or choose another slug.', 'thesis-ai-bridge'),
+                $slug,
+                (string)$existing->post_status,
+                (int)$existing->post_author
+            ),
+            ['existing_page_id' => (int)$existing->ID, 'status' => (string)$existing->post_status, 'author' => (int)$existing->post_author]
+        );
+    }
+
     private static function do_ensure_draft_page(array $input): array|WP_Error {
         $title = sanitize_text_field((string)($input['title'] ?? ''));
         if ($title === '') {
@@ -659,15 +723,11 @@ final class Thesis_AI_Bridge {
             return new WP_Error('thesis_ai_missing_slug', __('A stable slug is required for ensure-draft-page.', 'thesis-ai-bridge'));
         }
 
-        $existing = get_page_by_path($slug, OBJECT, 'page');
+        $existing = self::safe_ai_draft_by_slug($slug);
+        if (is_wp_error($existing)) {
+            return $existing;
+        }
         if ($existing instanceof WP_Post) {
-            if ((int)$existing->post_author !== get_current_user_id() || $existing->post_status !== 'draft') {
-                return new WP_Error(
-                    'thesis_ai_page_conflict',
-                    __('A page with this slug exists, but it is not a draft owned by the current AI user. The bridge will not overwrite it.', 'thesis-ai-bridge'),
-                    ['existing_page_id' => (int)$existing->ID]
-                );
-            }
             $updated = wp_update_post(wp_slash([
                 'ID' => (int)$existing->ID,
                 'post_title' => $title,
@@ -1076,13 +1136,16 @@ final class Thesis_AI_Bridge {
         }
         $settings = self::sanitize_elementor_settings($settings, 'page');
 
-        $existing = get_page_by_path($slug, OBJECT, 'page');
-        if ($existing) {
-            if ((int)$existing->post_author !== get_current_user_id() || $existing->post_status !== 'draft') {
-                return new WP_Error('thesis_ai_page_conflict', __('A page with this slug already exists and is not a safe AI-owned draft.', 'thesis-ai-bridge'));
-            }
+        $existing = self::safe_ai_draft_by_slug($slug);
+        if (is_wp_error($existing)) {
+            return $existing;
+        }
+        if ($existing instanceof WP_Post) {
             $page_id = (int)$existing->ID;
-            wp_update_post(['ID' => $page_id, 'post_title' => $title]);
+            $updated = wp_update_post(['ID' => $page_id, 'post_title' => $title, 'post_status' => 'draft'], true);
+            if (is_wp_error($updated)) {
+                return $updated;
+            }
         } else {
             $page_id = wp_insert_post(wp_slash([
                 'post_type' => 'page',

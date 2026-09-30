@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Thesis AI Bridge
  * Description: Controlled WordPress execution layer for the five-agent thesis prototype. Supports native Abilities API when available and a secure fallback REST API.
- * Version: 0.5.0
+ * Version: 0.5.3
  * Requires at least: 6.6
  * Requires PHP: 8.0
  * Author: Thesis Prototype
@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('THESIS_AI_BRIDGE_VERSION', '0.5.0');
+define('THESIS_AI_BRIDGE_VERSION', '0.5.3');
 define('THESIS_AI_BRIDGE_FILE', __FILE__);
 define('THESIS_AI_BRIDGE_DIR', plugin_dir_path(__FILE__));
 

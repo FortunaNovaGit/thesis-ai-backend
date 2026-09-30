@@ -30,6 +30,7 @@ class PolicyEngine:
     BUILD_ROLE = frozenset({AgentRole.BUILDER})
 
     RULES: dict[str, Rule] = {
+        "thesis-ai-bridge/get-site-snapshot": Rule(RiskLevel.LOW, READ_ROLES),
         "thesis-ai-bridge/get-site-info": Rule(RiskLevel.LOW, READ_ROLES),
         "thesis-ai-bridge/list-pages": Rule(RiskLevel.LOW, READ_ROLES),
         "thesis-ai-bridge/get-page": Rule(RiskLevel.LOW, READ_ROLES),

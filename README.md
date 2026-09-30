@@ -1,4 +1,4 @@
-# WordPress Multi-Agent Thesis MVP — v0.5.2
+# WordPress Multi-Agent Thesis MVP — v0.5.3
 
 Робочий прототип магістерської системи для автоматизованого формування WordPress-вебзастосунків за допомогою п'яти спеціалізованих агентів.
 
@@ -112,8 +112,12 @@ v0.5 test suite покриває Policy Engine, stateless connection tokens, rer
 Ці речі логічно додавати після стабілізації real-agent Elementor generation. Поточна версія вже готує для них capability/plugin layer.
 
 
-## Async build flow (v0.5.2)
+## Async build flow (v0.5.3)
 
 WordPress no longer waits for the whole build in one `admin-post.php` request. The plugin starts a job using `POST /v1/sites/{site_id}/builds`, redirects back to wp-admin, and polls `GET /v1/sites/{site_id}/builds/{job_id}` via short AJAX requests. This avoids hosting gateway timeouts during long agent/Elementor workflows.
 
 For the current test deployment the job registry is in process memory. Do not redeploy Render during an active build. A durable PostgreSQL queue is planned for the next infrastructure milestone.
+
+## EasyWP / managed hosting rate limiting (v0.5.3)
+
+v0.5.3 avoids bursty WordPress REST traffic by using a composite `get-site-snapshot` ability, request pacing, and adaptive 429 retries. The backend honors `Retry-After` when present and otherwise uses exponential backoff with jitter. A 429 is retried on the same canonical route and does not immediately trigger the alternate REST URL.

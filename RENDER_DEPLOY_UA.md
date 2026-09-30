@@ -1,8 +1,8 @@
-# Render — оновлення до v0.5.2
+# Render — оновлення до v0.5.3
 
 Для вже створеного Web Service нічого нового створювати не треба.
 
-1. Push backend v0.5.2 у `main`.
+1. Push backend v0.5.3 у `main`.
 2. Render -> Environment.
 3. Встановіть:
    - `AGENT_MODE=auto`

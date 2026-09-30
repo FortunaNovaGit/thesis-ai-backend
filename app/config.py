@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     max_repair_loops: int = 2
     transient_action_retries: int = 1
 
+    # EasyWP/managed-hosting friendly HTTP pacing and adaptive 429 handling.
+    wordpress_min_request_interval_seconds: float = 1.0
+    wordpress_rate_limit_retries: int = 5
+    wordpress_rate_limit_base_delay_seconds: float = 3.0
+    wordpress_rate_limit_max_delay_seconds: float = 45.0
+
     # Stable secret for self-contained encrypted WordPress connection tokens.
     # Configure once in Render. Redeploys then do not invalidate connected sites.
     backend_token_secret: str | None = None

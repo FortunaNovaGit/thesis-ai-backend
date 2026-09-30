@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import random
+import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -14,6 +19,52 @@ class WordPressExecutor(ABC):
     @abstractmethod
     async def execute(self, action: BuildAction) -> Any:
         raise NotImplementedError
+
+    async def _wait_for_slot(self) -> None:
+        """Serialize outbound WordPress requests and keep a small gap between them.
+
+        Managed WordPress firewalls commonly rate-limit short request bursts. The
+        build is asynchronous, so a small delay is preferable to triggering 429s.
+        """
+        async with self._request_lock:
+            now = time.monotonic()
+            wait = self.min_request_interval - (now - self._last_request_started)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last_request_started = time.monotonic()
+
+    def _retry_after_seconds(self, response: httpx.Response, retry_index: int) -> float:
+        header = (response.headers.get("retry-after") or "").strip()
+        if header:
+            try:
+                return min(self.rate_limit_max_delay, max(0.5, float(header)))
+            except ValueError:
+                try:
+                    dt = parsedate_to_datetime(header)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    seconds = (dt - datetime.now(timezone.utc)).total_seconds()
+                    if seconds > 0:
+                        return min(self.rate_limit_max_delay, max(0.5, seconds))
+                except Exception:
+                    pass
+        # Exponential backoff + jitter when the proxy does not expose its window.
+        base = min(self.rate_limit_max_delay, self.rate_limit_base_delay * (2 ** retry_index))
+        return min(self.rate_limit_max_delay, base + random.uniform(0.0, min(1.5, base * 0.15)))
+
+    async def _send_with_rate_limit(self, method: str, url: str, *, params=None, json_body=None) -> httpx.Response:
+        last: httpx.Response | None = None
+        for retry in range(self.rate_limit_retries + 1):
+            await self._wait_for_slot()
+            response = await self._send_with_rate_limit(method, url, params=params, json_body=json_body)
+            last = response
+            if response.status_code != 429:
+                return response
+            if retry >= self.rate_limit_retries:
+                return response
+            await asyncio.sleep(self._retry_after_seconds(response, retry))
+        assert last is not None
+        return last
 
     async def probe(self) -> dict[str, Any]:
         return {"mode": "unknown", "status": "probe-not-supported"}
@@ -31,14 +82,68 @@ class MockWordPressExecutor(WordPressExecutor):
         self.seo: dict[str, dict[str, str]] = {}
         self._next_id = 1
 
+    async def _wait_for_slot(self) -> None:
+        """Serialize outbound WordPress requests and keep a small gap between them.
+
+        Managed WordPress firewalls commonly rate-limit short request bursts. The
+        build is asynchronous, so a small delay is preferable to triggering 429s.
+        """
+        async with self._request_lock:
+            now = time.monotonic()
+            wait = self.min_request_interval - (now - self._last_request_started)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last_request_started = time.monotonic()
+
+    def _retry_after_seconds(self, response: httpx.Response, retry_index: int) -> float:
+        header = (response.headers.get("retry-after") or "").strip()
+        if header:
+            try:
+                return min(self.rate_limit_max_delay, max(0.5, float(header)))
+            except ValueError:
+                try:
+                    dt = parsedate_to_datetime(header)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    seconds = (dt - datetime.now(timezone.utc)).total_seconds()
+                    if seconds > 0:
+                        return min(self.rate_limit_max_delay, max(0.5, seconds))
+                except Exception:
+                    pass
+        # Exponential backoff + jitter when the proxy does not expose its window.
+        base = min(self.rate_limit_max_delay, self.rate_limit_base_delay * (2 ** retry_index))
+        return min(self.rate_limit_max_delay, base + random.uniform(0.0, min(1.5, base * 0.15)))
+
+    async def _send_with_rate_limit(self, method: str, url: str, *, params=None, json_body=None) -> httpx.Response:
+        last: httpx.Response | None = None
+        for retry in range(self.rate_limit_retries + 1):
+            await self._wait_for_slot()
+            async with self._client() as client:
+                response = await client.request(method, url, params=params, json=json_body)
+            last = response
+            if response.status_code != 429:
+                return response
+            if retry >= self.rate_limit_retries:
+                return response
+            await asyncio.sleep(self._retry_after_seconds(response, retry))
+        assert last is not None
+        return last
+
     async def probe(self) -> dict[str, Any]:
-        return {"mode": "mock", "status": "ok", "bridge_version": "0.5.0-mock", "native_abilities_api": True}
+        return {"mode": "mock", "status": "ok", "bridge_version": "0.5.3-mock", "native_abilities_api": True}
 
     async def execute(self, action: BuildAction) -> Any:
         ability, p = action.ability, action.parameters
         if ability == "thesis-ai-bridge/get-site-info":
             active_theme = next((t for t in self.themes.values() if t.get("active")), {"slug":"", "name":"", "version":""})
-            return {"name": self.site_title, "tagline": self.tagline, "url": "http://mock.local", "wordpress_version": "7.x", "php_version": "8.x", "theme": active_theme.get("name",""), "theme_slug": active_theme.get("slug",""), "theme_version": active_theme.get("version",""), "is_block_theme": False, "permalink_structure": "/%postname%/", "https": False, "multisite": False, "native_abilities_api": True, "bridge_version": "0.5.0-mock"}
+            return {"name": self.site_title, "tagline": self.tagline, "url": "http://mock.local", "wordpress_version": "7.x", "php_version": "8.x", "theme": active_theme.get("name",""), "theme_slug": active_theme.get("slug",""), "theme_version": active_theme.get("version",""), "is_block_theme": False, "permalink_structure": "/%postname%/", "https": False, "multisite": False, "native_abilities_api": True, "bridge_version": "0.5.3-mock"}
+        if ability == "thesis-ai-bridge/get-site-snapshot":
+            site_info = await self.execute(BuildAction(ability="thesis-ai-bridge/get-site-info", rationale="mock snapshot"))
+            plugins = await self.execute(BuildAction(ability="thesis-ai-bridge/list-plugins", rationale="mock snapshot"))
+            themes = await self.execute(BuildAction(ability="thesis-ai-bridge/list-themes", rationale="mock snapshot"))
+            capabilities = await self.execute(BuildAction(ability="thesis-ai-bridge/inspect-capabilities", rationale="mock snapshot"))
+            structure = await self.execute(BuildAction(ability="thesis-ai-bridge/get-site-structure", rationale="mock snapshot"))
+            return {"site_info": site_info, "pages": list(self.pages), "plugins": plugins, "themes": themes, "capabilities": capabilities, "structure": structure, "generated_at": "mock"}
         if ability == "thesis-ai-bridge/list-pages":
             return self.pages
         if ability == "thesis-ai-bridge/get-page":
@@ -127,6 +232,7 @@ class RemoteWordPressExecutor(WordPressExecutor):
     """
 
     READ_ONLY = {
+        "thesis-ai-bridge/get-site-snapshot",
         "thesis-ai-bridge/get-site-info",
         "thesis-ai-bridge/list-pages",
         "thesis-ai-bridge/get-page",
@@ -149,6 +255,10 @@ class RemoteWordPressExecutor(WordPressExecutor):
             mode=settings.wordpress_mode,
             verify_ssl=settings.wordpress_verify_ssl,
             timeout=settings.wordpress_timeout_seconds,
+            min_request_interval=settings.wordpress_min_request_interval_seconds,
+            rate_limit_retries=settings.wordpress_rate_limit_retries,
+            rate_limit_base_delay=settings.wordpress_rate_limit_base_delay_seconds,
+            rate_limit_max_delay=settings.wordpress_rate_limit_max_delay_seconds,
         )
 
     @classmethod
@@ -161,6 +271,10 @@ class RemoteWordPressExecutor(WordPressExecutor):
         mode: str = "bridge_rest",
         verify_ssl: bool = True,
         timeout: float = 30.0,
+        min_request_interval: float = 1.0,
+        rate_limit_retries: int = 5,
+        rate_limit_base_delay: float = 3.0,
+        rate_limit_max_delay: float = 45.0,
     ) -> "RemoteWordPressExecutor":
         obj = cls.__new__(cls)
         obj._configure(
@@ -170,6 +284,10 @@ class RemoteWordPressExecutor(WordPressExecutor):
             mode=mode,
             verify_ssl=verify_ssl,
             timeout=timeout,
+            min_request_interval=min_request_interval,
+            rate_limit_retries=rate_limit_retries,
+            rate_limit_base_delay=rate_limit_base_delay,
+            rate_limit_max_delay=rate_limit_max_delay,
         )
         return obj
 
@@ -182,22 +300,79 @@ class RemoteWordPressExecutor(WordPressExecutor):
         mode: str,
         verify_ssl: bool,
         timeout: float,
+        min_request_interval: float = 1.0,
+        rate_limit_retries: int = 5,
+        rate_limit_base_delay: float = 3.0,
+        rate_limit_max_delay: float = 45.0,
     ) -> None:
         self.base = site_url.rstrip("/")
         self.auth = httpx.BasicAuth(username, application_password)
         self.mode = mode
         self.verify = verify_ssl
         self.timeout = timeout
+        self.min_request_interval = max(0.0, float(min_request_interval))
+        self.rate_limit_retries = max(0, int(rate_limit_retries))
+        self.rate_limit_base_delay = max(0.5, float(rate_limit_base_delay))
+        self.rate_limit_max_delay = max(self.rate_limit_base_delay, float(rate_limit_max_delay))
         self._probe_cache: dict[str, Any] | None = None
+        self._request_lock = asyncio.Lock()
+        self._last_request_started = 0.0
 
     def _client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(
             auth=self.auth,
             timeout=self.timeout,
             verify=self.verify,
-            headers={"User-Agent": "Thesis-AI-Backend/0.5.2", "Accept": "application/json"},
+            headers={"User-Agent": "Thesis-AI-Backend/0.5.3", "Accept": "application/json"},
             follow_redirects=True,
         )
+
+    async def _wait_for_slot(self) -> None:
+        """Serialize outbound WordPress requests and keep a small gap between them.
+
+        Managed WordPress firewalls commonly rate-limit short request bursts. The
+        build is asynchronous, so a small delay is preferable to triggering 429s.
+        """
+        async with self._request_lock:
+            now = time.monotonic()
+            wait = self.min_request_interval - (now - self._last_request_started)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last_request_started = time.monotonic()
+
+    def _retry_after_seconds(self, response: httpx.Response, retry_index: int) -> float:
+        header = (response.headers.get("retry-after") or "").strip()
+        if header:
+            try:
+                return min(self.rate_limit_max_delay, max(0.5, float(header)))
+            except ValueError:
+                try:
+                    dt = parsedate_to_datetime(header)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    seconds = (dt - datetime.now(timezone.utc)).total_seconds()
+                    if seconds > 0:
+                        return min(self.rate_limit_max_delay, max(0.5, seconds))
+                except Exception:
+                    pass
+        # Exponential backoff + jitter when the proxy does not expose its window.
+        base = min(self.rate_limit_max_delay, self.rate_limit_base_delay * (2 ** retry_index))
+        return min(self.rate_limit_max_delay, base + random.uniform(0.0, min(1.5, base * 0.15)))
+
+    async def _send_with_rate_limit(self, method: str, url: str, *, params=None, json_body=None) -> httpx.Response:
+        last: httpx.Response | None = None
+        for retry in range(self.rate_limit_retries + 1):
+            await self._wait_for_slot()
+            async with self._client() as client:
+                response = await client.request(method, url, params=params, json=json_body)
+            last = response
+            if response.status_code != 429:
+                return response
+            if retry >= self.rate_limit_retries:
+                return response
+            await asyncio.sleep(self._retry_after_seconds(response, retry))
+        assert last is not None
+        return last
 
     async def probe(self) -> dict[str, Any]:
         if self._probe_cache is not None:
@@ -252,6 +427,13 @@ class RemoteWordPressExecutor(WordPressExecutor):
                 f"content-type={content_type or 'unknown'}; "
                 f"redirects={history or 'none'}; body={body[:180]!r}"
             )
+
+            if response.status_code == 429:
+                retry_after = response.headers.get("retry-after", "")
+                raise RuntimeError(
+                    f"WordPress rate limit persisted after {self.rate_limit_retries + 1} attempts. "
+                    f"Retry-After={retry_after or 'not provided'}. {detail}"
+                )
 
             if response.status_code in {404, 405}:
                 diagnostics.append(detail)
@@ -322,12 +504,11 @@ class RemoteWordPressExecutor(WordPressExecutor):
 
         last_error: httpx.HTTPStatusError | None = None
         for url in candidate_urls:
-            async with self._client() as client:
-                if action.ability in self.READ_ONLY:
-                    params = {"input": json.dumps(action.parameters)} if action.parameters else None
-                    response = await client.get(url, params=params)
-                else:
-                    response = await client.post(url, json={"input": action.parameters})
+            if action.ability in self.READ_ONLY:
+                params = {"input": json.dumps(action.parameters)} if action.parameters else None
+                response = await self._send_with_rate_limit("GET", url, params=params)
+            else:
+                response = await self._send_with_rate_limit("POST", url, json_body={"input": action.parameters})
             if response.status_code in {404, 405}:
                 try:
                     response.raise_for_status()
