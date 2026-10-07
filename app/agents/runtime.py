@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import secrets
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, TypeVar
+
+from pydantic import BaseModel, ValidationError
 
 from ..models import (
     AgentRole, AgentUsage, ApplicationSpec, BuildAction, BuildPlan, DesignSystem,
@@ -548,6 +550,68 @@ class MockAgentRuntime(AgentRuntime):
         return BuildPlan(actions=actions)
 
 
+TModel = TypeVar("TModel", bound=BaseModel)
+
+
+def _extract_json_value(text: str) -> Any:
+    """Extract the first JSON value from a model text response.
+
+    The Agents SDK structured-output schema layer is deliberately not used here.
+    This keeps our five-agent workflow independent from SDK strict-schema changes,
+    while Pydantic remains the authoritative validator after generation.
+    """
+    candidate = (text or "").strip()
+    if not candidate:
+        raise ValueError("Agent returned an empty response")
+
+    # Common fenced response despite the explicit JSON-only instruction.
+    if candidate.startswith("```"):
+        lines = candidate.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        candidate = "\n".join(lines).strip()
+        if candidate.lower().startswith("json\n"):
+            candidate = candidate[5:].lstrip()
+
+    decoder = json.JSONDecoder()
+    # First try the entire response.
+    try:
+        value, index = decoder.raw_decode(candidate)
+        if candidate[index:].strip() in {"", "```"}:
+            return value
+    except json.JSONDecodeError:
+        pass
+
+    # Then tolerate a short textual prefix and locate the first object/array.
+    starts = [i for i, ch in enumerate(candidate) if ch in "{["]
+    for i in starts:
+        try:
+            value, _ = decoder.raw_decode(candidate[i:])
+            return value
+        except json.JSONDecodeError:
+            continue
+    raise ValueError("Agent did not return a valid JSON object")
+
+
+def _validate_agent_json(text: str, output_model: type[TModel]) -> TModel:
+    value = _extract_json_value(text)
+    return output_model.model_validate(value)
+
+
+def _response_contract(output_model: type[BaseModel]) -> str:
+    # The schema is guidance inside the prompt, not an API structured-output
+    # schema. This avoids the strict_json_schema failure entirely.
+    schema = json.dumps(output_model.model_json_schema(), ensure_ascii=False, separators=(",", ":"))
+    return (
+        "\n\nRESPONSE CONTRACT:\n"
+        "Return exactly ONE valid JSON object and nothing else. No Markdown fences, no commentary. "
+        "The JSON must validate against this schema. Preserve enum values exactly. "
+        "Do not omit required fields.\nJSON_SCHEMA=" + schema
+    )
+
+
 class OpenAIAgentRuntime(AgentRuntime):
     def __init__(self, model: str) -> None:
         super().__init__()
@@ -556,32 +620,77 @@ class OpenAIAgentRuntime(AgentRuntime):
         except ImportError as exc:
             raise RuntimeError("Install dependencies with: pip install -e .") from exc
         self.model = model
-        self.orchestrator = Agent(name="Orchestrator", instructions=orchestrator_prompt(), model=model, output_type=TaskPlan)
-        self.architect_agent = Agent(name="Architect & Capability", instructions=architect_prompt(), model=model, output_type=ApplicationSpec)
-        self.design_agent = Agent(name="Design, Content & SEO", instructions=design_prompt(), model=model, output_type=ExperienceSpec)
-        self.builder_agent = Agent(name="WordPress Implementation", instructions=builder_prompt(), model=model, output_type=BuildPlan)
-        self.quality_agent = Agent(name="Quality & Security", instructions=quality_prompt(), model=model, output_type=QualityReport)
+        # Intentionally keep Agents SDK output_type unset. We validate every
+        # response ourselves with Pydantic. This removes our dependency on the
+        # SDK's strict structured-output schema conversion, which caused builds
+        # to stop before any WordPress actions were created.
+        self.orchestrator = Agent(name="Orchestrator", instructions=orchestrator_prompt(), model=model)
+        self.architect_agent = Agent(name="Architect & Capability", instructions=architect_prompt(), model=model)
+        self.design_agent = Agent(name="Design, Content & SEO", instructions=design_prompt(), model=model)
+        self.builder_agent = Agent(name="WordPress Implementation", instructions=builder_prompt(), model=model)
+        self.quality_agent = Agent(name="Quality & Security", instructions=quality_prompt(), model=model)
 
-    async def _run(self, agent, payload: str):
+    async def _run_raw(self, agent, payload: str) -> str:
         from agents import Runner
         result = await Runner.run(agent, payload, max_turns=8)
         usage = result.context_wrapper.usage
-        self.usage.add(AgentUsage(requests=int(usage.requests), input_tokens=int(usage.input_tokens), output_tokens=int(usage.output_tokens), total_tokens=int(usage.total_tokens)))
-        return result.final_output
+        self.usage.add(AgentUsage(
+            requests=int(usage.requests),
+            input_tokens=int(usage.input_tokens),
+            output_tokens=int(usage.output_tokens),
+            total_tokens=int(usage.total_tokens),
+        ))
+        output = result.final_output
+        if isinstance(output, str):
+            return output
+        # This branch is defensive; with output_type unset the SDK should return str.
+        return json.dumps(output, ensure_ascii=False, default=str)
+
+    async def _run_typed(self, agent, payload: str, output_model: type[TModel]) -> TModel:
+        contract = _response_contract(output_model)
+        first = await self._run_raw(agent, payload + contract)
+        try:
+            return _validate_agent_json(first, output_model)
+        except (ValueError, ValidationError) as exc:
+            # One bounded formatter retry. It uses the same specialist agent and
+            # is counted in usage; there is no unbounded schema-repair loop.
+            correction = (
+                payload
+                + contract
+                + "\n\nYour previous response was invalid. Fix ONLY the JSON formatting/schema issues. "
+                  "Do not change the intended solution unless required for schema validity.\n"
+                + "VALIDATION_ERROR=" + str(exc)[:4000]
+                + "\nPREVIOUS_RESPONSE=" + first[:16000]
+            )
+            second = await self._run_raw(agent, correction)
+            try:
+                return _validate_agent_json(second, output_model)
+            except (ValueError, ValidationError) as second_exc:
+                raise RuntimeError(
+                    f"{agent.name} returned invalid JSON twice: {second_exc}"
+                ) from second_exc
 
     async def plan(self, user_request: str) -> TaskPlan:
-        return await self._run(self.orchestrator, user_request)
+        return await self._run_typed(self.orchestrator, user_request, TaskPlan)
 
     async def architect(self, user_request: str, task_plan: TaskPlan, site_snapshot: SiteSnapshot, renderer: Renderer) -> ApplicationSpec:
-        result = await self._run(self.architect_agent, json.dumps({"user_request": user_request, "task_plan": task_plan.model_dump(), "site_snapshot": site_snapshot.model_dump(), "renderer": renderer}, ensure_ascii=False))
+        result = await self._run_typed(
+            self.architect_agent,
+            json.dumps({"user_request": user_request, "task_plan": task_plan.model_dump(), "site_snapshot": site_snapshot.model_dump(), "renderer": renderer}, ensure_ascii=False),
+            ApplicationSpec,
+        )
         return _normalize_application_spec(result, renderer)
 
     async def design(self, app_spec: ApplicationSpec, renderer: Renderer) -> ExperienceSpec:
-        result = await self._run(self.design_agent, json.dumps({"application_spec": app_spec.model_dump(), "renderer": renderer}, ensure_ascii=False))
+        result = await self._run_typed(
+            self.design_agent,
+            json.dumps({"application_spec": app_spec.model_dump(), "renderer": renderer}, ensure_ascii=False),
+            ExperienceSpec,
+        )
         return _reconcile_experience_spec(app_spec, result)
 
     async def build(self, app_spec: ApplicationSpec, experience_spec: ExperienceSpec, site_snapshot: SiteSnapshot, renderer: Renderer) -> BuildPlan:
-        proposed = await self._run(
+        proposed = await self._run_typed(
             self.builder_agent,
             json.dumps({
                 "application_spec": app_spec.model_dump(),
@@ -590,15 +699,24 @@ class OpenAIAgentRuntime(AgentRuntime):
                 "renderer": renderer,
                 "instruction": "Plan only controlled high-level abilities. Exact Elementor/Gutenberg renderer payloads are compiled deterministically by the runtime.",
             }, ensure_ascii=False),
+            BuildPlan,
         )
         baseline = _compile_required_build_plan(app_spec, experience_spec, site_snapshot, renderer)
         return _merge_safe_advisory_actions(baseline, proposed)
 
     async def quality(self, app_spec: ApplicationSpec, experience_spec: ExperienceSpec, executions_json: str, verification_snapshot: SiteSnapshot, renderer: Renderer) -> QualityReport:
-        return await self._run(self.quality_agent, json.dumps({"application_spec": app_spec.model_dump(), "experience_spec": experience_spec.model_dump(), "renderer": renderer, "executions": json.loads(executions_json), "verification_snapshot": verification_snapshot.model_dump(), "evidence_limit": "No browser/visual test evidence is supplied; do not claim it passed."}, ensure_ascii=False))
+        return await self._run_typed(
+            self.quality_agent,
+            json.dumps({"application_spec": app_spec.model_dump(), "experience_spec": experience_spec.model_dump(), "renderer": renderer, "executions": json.loads(executions_json), "verification_snapshot": verification_snapshot.model_dump(), "evidence_limit": "No browser/visual test evidence is supplied; do not claim it passed."}, ensure_ascii=False),
+            QualityReport,
+        )
 
     async def repair(self, app_spec: ApplicationSpec, experience_spec: ExperienceSpec, verification_snapshot: SiteSnapshot, quality_report: QualityReport, executions_json: str, renderer: Renderer) -> BuildPlan:
-        return await self._run(self.builder_agent, json.dumps({"mode": "repair", "application_spec": app_spec.model_dump(), "experience_spec": experience_spec.model_dump(), "renderer": renderer, "verification_snapshot": verification_snapshot.model_dump(), "quality_report": quality_report.model_dump(), "executions": json.loads(executions_json), "instruction": "Return the smallest safe idempotent BuildPlan that fixes the listed issues. Do not repeat successful actions unless necessary."}, ensure_ascii=False))
+        return await self._run_typed(
+            self.builder_agent,
+            json.dumps({"mode": "repair", "application_spec": app_spec.model_dump(), "experience_spec": experience_spec.model_dump(), "renderer": renderer, "verification_snapshot": verification_snapshot.model_dump(), "quality_report": quality_report.model_dump(), "executions": json.loads(executions_json), "instruction": "Return the smallest safe idempotent BuildPlan that fixes the listed issues. Do not repeat successful actions unless necessary."}, ensure_ascii=False),
+            BuildPlan,
+        )
 
 
 def make_agent_runtime(mode: str, model: str) -> AgentRuntime:

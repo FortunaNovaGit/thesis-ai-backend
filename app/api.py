@@ -19,7 +19,7 @@ from .models import SiteSnapshot
 from .pull_workflow import PullPlanningWorkflow
 
 
-app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.6.0")
+app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.6.2")
 codec = ConnectionTokenCodec(settings.backend_token_secret, Path(settings.backend_key_file))
 
 # Planning jobs live only while the Render process is alive. The actual WordPress
@@ -107,12 +107,13 @@ def _credentials(site_id: str, authorization: str | None):
 async def health() -> dict[str, Any]:
     return {
         "status": "ok",
-        "version": "0.6.0",
+        "version": "0.6.2",
         "execution_mode": "wordpress_pull",
         "agent_mode": settings.resolved_agent_mode,
         "configured_agent_mode": settings.agent_mode,
         "model": settings.openai_model if settings.resolved_agent_mode == "openai" else "mock",
         "stable_connection_tokens": codec.persistent,
+        "agent_output_mode": "json_text_pydantic",
     }
 
 
