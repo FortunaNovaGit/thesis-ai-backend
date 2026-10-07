@@ -141,13 +141,13 @@ class MockWordPressExecutor(WordPressExecutor):
         return last
 
     async def probe(self) -> dict[str, Any]:
-        return {"mode": "mock", "status": "ok", "bridge_version": "0.5.4-mock", "native_abilities_api": True}
+        return {"mode": "mock", "status": "ok", "bridge_version": "0.5.5-mock", "native_abilities_api": True}
 
     async def execute(self, action: BuildAction) -> Any:
         ability, p = action.ability, action.parameters
         if ability == "thesis-ai-bridge/get-site-info":
             active_theme = next((t for t in self.themes.values() if t.get("active")), {"slug":"", "name":"", "version":""})
-            return {"name": self.site_title, "tagline": self.tagline, "url": "http://mock.local", "wordpress_version": "7.x", "php_version": "8.x", "theme": active_theme.get("name",""), "theme_slug": active_theme.get("slug",""), "theme_version": active_theme.get("version",""), "is_block_theme": False, "permalink_structure": "/%postname%/", "https": False, "multisite": False, "native_abilities_api": True, "bridge_version": "0.5.4-mock"}
+            return {"name": self.site_title, "tagline": self.tagline, "url": "http://mock.local", "wordpress_version": "7.x", "php_version": "8.x", "theme": active_theme.get("name",""), "theme_slug": active_theme.get("slug",""), "theme_version": active_theme.get("version",""), "is_block_theme": False, "permalink_structure": "/%postname%/", "https": False, "multisite": False, "native_abilities_api": True, "bridge_version": "0.5.5-mock"}
         if ability == "thesis-ai-bridge/get-site-snapshot":
             site_info = await self.execute(BuildAction(ability="thesis-ai-bridge/get-site-info", rationale="mock snapshot"))
             plugins = await self.execute(BuildAction(ability="thesis-ai-bridge/list-plugins", rationale="mock snapshot"))
@@ -227,6 +227,10 @@ class MockWordPressExecutor(WordPressExecutor):
             if not self.plugins.get("contact-form-7", {}).get("active"):
                 raise RuntimeError("Contact Form 7 is not active")
             return {"id": 1, "title": str(p.get("title", "AI Contact")), "shortcode": '[contact-form-7 id="1" title="AI Contact"]', "created": True}
+        if ability == "thesis-ai-bridge/configure-woocommerce":
+            return {"configured": True, "currency": p.get("currency", "USD"), "pages": {"shop": {"id": 900, "title": "Shop"}, "cart": {"id": 901, "title": "Cart"}, "checkout": {"id": 902, "title": "Checkout"}}}
+        if ability == "thesis-ai-bridge/apply-acf-model":
+            return {"configured": True, "content_types": p.get("content_types", [])}
         if ability in {"acf.apply-model","woocommerce.configure"}:
             return {"ok":True,"ability":ability,"parameters":p,"mode":"mock"}
         raise RuntimeError(f"Mock executor has no implementation for {ability}")
@@ -334,7 +338,7 @@ class RemoteWordPressExecutor(WordPressExecutor):
             auth=self.auth,
             timeout=self.timeout,
             verify=self.verify,
-            headers={"User-Agent": "Thesis-AI-Backend/0.5.4", "Accept": "application/json"},
+            headers={"User-Agent": "Thesis-AI-Backend/0.5.5", "Accept": "application/json"},
             follow_redirects=True,
         )
 

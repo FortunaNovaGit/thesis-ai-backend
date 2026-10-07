@@ -126,7 +126,30 @@ def test_workflow_uses_batches_and_no_extra_verification_request(tmp_path: Path)
     workflow = MultiAgentWorkflow(settings, MockAgentRuntime(), executor, tmp_path)
     result = asyncio.run(workflow.run("Створи простий сайт стоматології"))
     assert result.status == "passed"
-    # One preflight snapshot over WordPress HTTP, then the build batch itself returns
-    # the post-build snapshot. The mock batch internally creates the snapshot locally.
-    assert executor.batch_calls == 1
+    # One preflight snapshot, then two guarded phases: content and final site
+    # assembly. The final assembly batch returns the verification snapshot, so
+    # there is no third remote verification call.
+    assert executor.batch_calls == 2
     assert executor.snapshot_calls == 2
+
+
+def test_staged_execution_skips_preflight_satisfied_elementor_dependency(tmp_path: Path):
+    settings = Settings(
+        agent_mode="mock", wordpress_mode="mock", auto_approve_medium_risk=True,
+        wordpress_batch_size=50, max_repair_loops=0,
+    )
+    executor = CountingBatchExecutor()
+    executor.plugins["elementor"] = {
+        "plugin_slug": "elementor", "plugin_file": "elementor/elementor.php",
+        "installed": True, "active": True, "version": "3.x",
+    }
+    executor.themes["mock-theme"]["active"] = False
+    executor.themes["hello-elementor"] = {"slug": "hello-elementor", "name": "Hello Elementor", "version": "1.0", "active": True}
+    workflow = MultiAgentWorkflow(settings, MockAgentRuntime(), executor, tmp_path)
+    result = asyncio.run(workflow.run("Створи простий сайт стоматології"))
+    assert result.status == "passed"
+    elementor_dep = [x for x in result.executions if x.action.ability == "thesis-ai-bridge/ensure-approved-plugin" and x.action.parameters.get("plugin_slug") == "elementor"]
+    # Architect/capability resolution may prune the dependency entirely when the
+    # preflight snapshot already proves Elementor is active. Either way there must
+    # be no remote activation attempt.
+    assert elementor_dep == []

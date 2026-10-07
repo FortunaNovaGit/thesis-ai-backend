@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     # auto => OpenAI when OPENAI_API_KEY is present, otherwise deterministic mock.
     agent_mode: str = "auto"
-    openai_model: str = "gpt-5.6-terra"
+    openai_model: str = "gpt-5.6-sol"
     openai_api_key: str | None = None
 
     # mock | auto | abilities_rest | bridge_rest
@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     wordpress_rate_limit_base_delay_seconds: float = 180.0
     wordpress_rate_limit_max_delay_seconds: float = 300.0
     # Batch multiple logical WordPress actions into one REST request. This is the
-    # primary EasyWP anti-rate-limit strategy in v0.5.4.
+    # primary EasyWP anti-rate-limit strategy retained from v0.5.4.
     wordpress_batch_size: int = 8
     wordpress_inter_batch_delay_seconds: float = 3.0
 

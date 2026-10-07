@@ -91,10 +91,14 @@ def _widget(widget_type: str, settings: dict[str, Any]) -> dict[str, Any]:
 
 
 def _container(elements: list[dict[str, Any]], settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    # Stability profile: these controls were proven to save correctly in the
+    # earlier EasyWP/Elementor integration. Richer responsive/typography controls
+    # can be layered back after transport/execution is stable.
     base: dict[str, Any] = {
-        "content_width": "boxed", "flex_direction": "column",
-        "gap": _responsive_px(20), "padding": _box(64, 28, 64, 28),
-        "padding_tablet": _box(48, 22, 48, 22), "padding_mobile": _box(36, 18, 36, 18),
+        "content_width": "boxed",
+        "flex_direction": "column",
+        "gap": _responsive_px(20),
+        "padding": _box(56, 24, 56, 24),
     }
     if settings:
         base.update(settings)
@@ -103,27 +107,27 @@ def _container(elements: list[dict[str, Any]], settings: dict[str, Any] | None =
 
 def _heading(text: str, color: str, *, level: str = "h2", size: int = 42, font: str = "Manrope") -> dict[str, Any]:
     return _widget("heading", {
-        "title": text, "header_size": level, "title_color": color,
-        "typography_typography": "custom", "typography_font_family": font,
-        "typography_font_size": _responsive_px(size), "typography_font_weight": "700",
+        "title": text,
+        "header_size": level,
+        "title_color": color,
     })
 
 
 def _text(text: str, color: str, *, font: str = "Inter") -> dict[str, Any]:
     return _widget("text-editor", {
-        "editor": f"<p>{text}</p>", "text_color": color,
-        "typography_typography": "custom", "typography_font_family": font,
-        "typography_font_size": _responsive_px(18), "typography_line_height": {"unit": "em", "size": 1.65, "sizes": []},
+        "editor": f"<p>{text}</p>",
+        "text_color": color,
     })
 
 
 def _button(label: str, url: str, ds: DesignSystem, *, dark: bool = False) -> dict[str, Any]:
     return _widget("button", {
-        "text": label, "link": {"url": url, "is_external": "", "nofollow": ""},
+        "text": label,
+        "link": {"url": url, "is_external": "", "nofollow": ""},
+        "size": "md",
         "background_color": ds.accent if dark else ds.primary,
-        "button_text_color": "#FFFFFF", "border_radius": _box(ds.radius, ds.radius, ds.radius, ds.radius),
-        "typography_typography": "custom", "typography_font_family": ds.body_font,
-        "typography_font_weight": "600", "button_css_id": "",
+        "button_text_color": "#FFFFFF",
+        "border_radius": _box(ds.radius, ds.radius, ds.radius, ds.radius),
     })
 
 
@@ -132,9 +136,10 @@ def _card(title: str, body: str, ds: DesignSystem) -> dict[str, Any]:
         _heading(title, ds.text, level="h3", size=24, font=ds.heading_font),
         _text(body, ds.muted, font=ds.body_font),
     ], {
-        "background_background": "classic", "background_color": ds.background,
-        "padding": _box(28, 28, 28, 28), "border_radius": _box(ds.radius, ds.radius, ds.radius, ds.radius),
-        "width": {"unit": "%", "size": 31, "sizes": []}, "width_tablet": {"unit": "%", "size": 48, "sizes": []}, "width_mobile": {"unit": "%", "size": 100, "sizes": []},
+        "background_background": "classic",
+        "background_color": ds.background,
+        "padding": _box(24, 24, 24, 24),
+        "border_radius": _box(ds.radius, ds.radius, ds.radius, ds.radius),
     })
 
 
@@ -224,6 +229,23 @@ def _normalize_application_spec(spec: ApplicationSpec, renderer: Renderer) -> Ap
             continue
         plugin_seen.add(item.plugin_slug)
         plugin_plan.append(item)
+
+    # Deterministic capability invariants. Agents decide intent, but the runtime
+    # guarantees that required implementation dependencies are never forgotten.
+    required = set(spec.required_capabilities)
+    if renderer in {"elementor", "auto"} and "elementor" not in plugin_seen:
+        plugin_plan.insert(0, PluginPlanItem(capability="page_builder_elementor", plugin_slug="elementor", reason="Required Elementor Free renderer"))
+        plugin_seen.add("elementor")
+    if ("ecommerce" in required or "commerce" in spec.site_type.lower() or "shop" in spec.site_type.lower()) and "woocommerce" not in plugin_seen:
+        plugin_plan.append(PluginPlanItem(capability="ecommerce", plugin_slug="woocommerce", reason="Required e-commerce capability"))
+        plugin_seen.add("woocommerce")
+    if any(ct.implementation == "cpt" for ct in spec.content_types) and "advanced-custom-fields" not in plugin_seen:
+        plugin_plan.append(PluginPlanItem(capability="structured_content", plugin_slug="advanced-custom-fields", reason="Structured content/data model capability"))
+        plugin_seen.add("advanced-custom-fields")
+    if "forms" in required and "contact-form-7" not in plugin_seen:
+        plugin_plan.append(PluginPlanItem(capability="forms", plugin_slug="contact-form-7", reason="Approved contact/booking form capability"))
+        plugin_seen.add("contact-form-7")
+
     if renderer in {"elementor", "auto"}:
         theme_slug = "hello-elementor" if spec.theme_slug != "hello-elementor" else spec.theme_slug
     else:
@@ -289,6 +311,21 @@ def _compile_required_build_plan(
             ability="thesis-ai-bridge/ensure-approved-plugin",
             parameters={"plugin_slug": plugin.plugin_slug},
             rationale=plugin.reason,
+        ))
+
+    if any(p.plugin_slug == "woocommerce" for p in app_spec.plugin_plan) or _plugin_active(site_snapshot, "woocommerce"):
+        actions.append(BuildAction(
+            ability="thesis-ai-bridge/configure-woocommerce",
+            parameters={"currency": "UAH" if app_spec.language.startswith("uk") else "USD"},
+            rationale="Configure the basic WooCommerce store and required core pages",
+        ))
+
+    cpt_models = [ct.model_dump(mode="json") for ct in app_spec.content_types if ct.implementation == "cpt"]
+    if cpt_models:
+        actions.append(BuildAction(
+            ability="thesis-ai-bridge/apply-acf-model",
+            parameters={"content_types": cpt_models},
+            rationale="Persist the Architect agent's structured content model using ACF Free + WordPress CPTs",
         ))
 
     needs_booking_form = any(
@@ -366,6 +403,8 @@ def _merge_safe_advisory_actions(baseline: BuildPlan, proposed: BuildPlan) -> Bu
         "thesis-ai-bridge/update-site-identity",
         "thesis-ai-bridge/ensure-navigation-menu",
         "thesis-ai-bridge/set-homepage-by-slug",
+        "thesis-ai-bridge/configure-woocommerce",
+        "thesis-ai-bridge/apply-acf-model",
     }
     actions = list(baseline.actions)
     seen = {

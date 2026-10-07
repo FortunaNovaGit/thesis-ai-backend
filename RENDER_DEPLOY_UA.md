@@ -1,18 +1,28 @@
-# Render — оновлення до v0.5.4
+# Render deployment — v0.6.0
 
-1. Замініть backend files у GitHub repo на v0.5.4.
-2. Commit + Push у `main`.
-3. Render автоматично redeploy.
-4. Перевірте `/health` → `version: 0.5.4`.
-5. Environment variables рекомендовано:
+Backend більше не підключається до WordPress напряму. Render використовується для LLM-агентів, orchestration, Policy Engine і QA/repair.
+
+Рекомендовані Environment Variables:
 
 ```text
-WORDPRESS_MIN_REQUEST_INTERVAL_SECONDS=2.0
-WORDPRESS_RATE_LIMIT_RETRIES=2
-WORDPRESS_RATE_LIMIT_BASE_DELAY_SECONDS=180.0
-WORDPRESS_RATE_LIMIT_MAX_DELAY_SECONDS=300.0
-WORDPRESS_BATCH_SIZE=8
-WORDPRESS_INTER_BATCH_DELAY_SECONDS=3.0
+AGENT_MODE=auto
+OPENAI_MODEL=gpt-5.6-sol
+OPENAI_API_KEY=<secret>
+BACKEND_TOKEN_SECRET=<stable secret — НЕ змінювати між deploy>
+AUTO_APPROVE_MEDIUM_RISK=true
+MAX_REPAIR_LOOPS=2
+ALLOW_INSECURE_WORDPRESS=false
+ALLOW_PRIVATE_WORDPRESS=false
 ```
 
-`BACKEND_TOKEN_SECRET` не змінюйте, інакше WordPress connection token стане недійсним.
+Після deploy:
+
+```text
+GET /health
+```
+
+повинен повернути `version=0.6.0` та `execution_mode=wordpress_pull`.
+
+## Чому більше немає EasyWP 429
+
+У v0.6 backend не робить build-time HTTP requests до EasyWP. WordPress сам виконує abilities локально з wp-admin AJAX. До Render йдуть лише outbound requests: planning/status/verification.

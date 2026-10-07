@@ -70,6 +70,7 @@ class MultiAgentWorkflow:
         attempt: int = 1,
         progress_start: int = 50,
         progress_end: int = 75,
+        include_final_snapshot: bool = True,
     ) -> tuple[bool, SiteSnapshot | None]:
         """Policy-check actions individually, then execute allowed actions in small HTTP batches.
 
@@ -111,7 +112,7 @@ class MultiAgentWorkflow:
         processed = 0
         for chunk_index, chunk in enumerate(chunks):
             chunk_actions = [item[0] for item in chunk]
-            include_snapshot = chunk_index == len(chunks) - 1
+            include_snapshot = include_final_snapshot and chunk_index == len(chunks) - 1
             pct = progress_start + int((processed / max(1, total)) * max(1, progress_end - progress_start))
             await self._progress(
                 "building" if actor == AgentRole.BUILDER else "repair",
@@ -157,10 +158,153 @@ class MultiAgentWorkflow:
                 )
             self._save(run)
 
-            if chunk_index < len(chunks) - 1 and self.settings.wordpress_inter_batch_delay_seconds > 0:
+            if (
+                chunk_index < len(chunks) - 1
+                and self.settings.wordpress_mode != "mock"
+                and self.settings.wordpress_inter_batch_delay_seconds > 0
+            ):
                 await asyncio.sleep(float(self.settings.wordpress_inter_batch_delay_seconds))
 
         return has_pending_approval, latest_snapshot
+
+
+    @staticmethod
+    def _snapshot_plugin_active(snapshot: SiteSnapshot, slug: str) -> bool:
+        for plugin in snapshot.plugins:
+            if str(plugin.get("slug", "")) == slug:
+                return bool(plugin.get("active"))
+        approved = snapshot.capabilities.get("approved_plugins", {}) if isinstance(snapshot.capabilities, dict) else {}
+        state = approved.get(slug) if isinstance(approved, dict) else None
+        return bool(isinstance(state, dict) and state.get("active"))
+
+    @staticmethod
+    def _snapshot_theme_active(snapshot: SiteSnapshot, slug: str) -> bool:
+        return str(snapshot.site_info.get("theme_slug", "")) == slug
+
+    async def _execute_actions_staged(
+        self,
+        run: ProjectRun,
+        actions: list[BuildAction],
+        actor: AgentRole,
+        snapshot: SiteSnapshot,
+        *,
+        attempt: int = 1,
+        progress_start: int = 50,
+        progress_end: int = 75,
+    ) -> tuple[bool, SiteSnapshot | None]:
+        """Execute actions in fresh-request phases.
+
+        Plugin/theme activation must never share the same PHP request with
+        Elementor document creation: WordPress loads active plugins/themes during
+        bootstrap, so newly activated code is not guaranteed to be fully initialized
+        until the next request. v0.5.4 batched across that boundary and could turn
+        one Elementor/activation error into a whole-batch HTTP 500.
+
+        We still keep request volume low:
+        - already-satisfied dependencies are resolved from preflight with zero HTTP calls;
+        - dependency changes run as isolated requests (fresh bootstrap barrier);
+        - page + SEO work runs in one guarded batch;
+        - site assembly runs in a final guarded batch that returns the snapshot.
+        """
+        dependency_abilities = {
+            "thesis-ai-bridge/ensure-approved-plugin",
+            "thesis-ai-bridge/ensure-approved-theme",
+        }
+        dependent_setup = {"thesis-ai-bridge/ensure-contact-form"}
+        assembly_abilities = {
+            "thesis-ai-bridge/update-site-identity",
+            "thesis-ai-bridge/ensure-navigation-menu",
+            "thesis-ai-bridge/set-homepage-by-slug",
+        }
+
+        dependencies: list[BuildAction] = []
+        setup: list[BuildAction] = []
+        content: list[BuildAction] = []
+        assembly: list[BuildAction] = []
+
+        for action in actions:
+            if action.ability in dependency_abilities:
+                # Resolve no-op dependency actions from the preflight snapshot.
+                if action.ability.endswith("ensure-approved-plugin"):
+                    slug = str(action.parameters.get("plugin_slug", ""))
+                    if slug and self._snapshot_plugin_active(snapshot, slug):
+                        decision = self.policy.evaluate(actor=actor, action=action, auto_approve_medium=self.settings.auto_approve_medium_risk)
+                        run.executions.append(ActionExecution(
+                            action=action, policy=decision, executed=True,
+                            result={"plugin_slug": slug, "active": True, "changed": False, "message": "Already active at preflight."},
+                            attempt=attempt,
+                        ))
+                        continue
+                if action.ability.endswith("ensure-approved-theme"):
+                    slug = str(action.parameters.get("theme_slug", ""))
+                    if slug and self._snapshot_theme_active(snapshot, slug):
+                        decision = self.policy.evaluate(actor=actor, action=action, auto_approve_medium=self.settings.auto_approve_medium_risk)
+                        run.executions.append(ActionExecution(
+                            action=action, policy=decision, executed=True,
+                            result={"theme_slug": slug, "active": True, "changed": False, "message": "Already active at preflight."},
+                            attempt=attempt,
+                        ))
+                        continue
+                dependencies.append(action)
+            elif action.ability in dependent_setup:
+                setup.append(action)
+            elif action.ability in assembly_abilities:
+                assembly.append(action)
+            else:
+                content.append(action)
+        self._save(run)
+
+        has_pending = False
+        latest_snapshot: SiteSnapshot | None = None
+
+        # Dependencies are intentionally isolated. A fresh WordPress bootstrap after
+        # activation is a correctness boundary, not an optimization detail.
+        for idx, action in enumerate(dependencies):
+            pct = progress_start + min(8, idx * 2)
+            await self._progress("building" if actor == AgentRole.BUILDER else "repair", pct, f"Preparing dependency: {action.ability}")
+            ex = await self._execute_action(run, action, actor, attempt=attempt)
+            if ex.policy.outcome == PolicyOutcome.REQUIRE_APPROVAL:
+                has_pending = True
+            if not ex.executed and ex.policy.outcome == PolicyOutcome.ALLOW:
+                # If a dependency cannot be prepared, dependent page work would only
+                # create noise. Stop this phase and let QA report the exact failure.
+                return has_pending, latest_snapshot
+            if self.settings.wordpress_mode != "mock" and self.settings.wordpress_inter_batch_delay_seconds > 0:
+                await asyncio.sleep(float(self.settings.wordpress_inter_batch_delay_seconds))
+
+        # Contact Form 7 forms (or similar setup) need a request after plugin bootstrap.
+        if setup and not has_pending:
+            pending, _ = await self._execute_actions_batched(
+                run, setup, actor, attempt=attempt,
+                progress_start=progress_start + 10, progress_end=progress_start + 14,
+                include_final_snapshot=False,
+            )
+            has_pending = has_pending or pending
+            if self.settings.wordpress_mode != "mock" and self.settings.wordpress_inter_batch_delay_seconds > 0:
+                await asyncio.sleep(float(self.settings.wordpress_inter_batch_delay_seconds))
+
+        if content and not has_pending:
+            pending, snap = await self._execute_actions_batched(
+                run, content, actor, attempt=attempt,
+                progress_start=progress_start + 15, progress_end=max(progress_start + 16, progress_end - 6),
+                include_final_snapshot=False,
+            )
+            has_pending = has_pending or pending
+            latest_snapshot = snap or latest_snapshot
+
+        # Final assembly happens only after pages exist. Returning snapshot here avoids
+        # another verification request and is safe because no plugin/theme bootstrap
+        # change is mixed into this request.
+        if assembly and not has_pending:
+            pending, snap = await self._execute_actions_batched(
+                run, assembly, actor, attempt=attempt,
+                progress_start=max(progress_start + 16, progress_end - 5), progress_end=progress_end,
+                include_final_snapshot=True,
+            )
+            has_pending = has_pending or pending
+            latest_snapshot = snap or latest_snapshot
+
+        return has_pending, latest_snapshot
 
     async def _inspect_site(self, run: ProjectRun, actor: AgentRole = AgentRole.ARCHITECT) -> SiteSnapshot:
         # One composite Bridge call replaces six back-to-back REST requests. This
@@ -210,8 +354,9 @@ class MultiAgentWorkflow:
 
         await self._progress("build_plan", 48, "Implementation agent is compiling the build plan")
         run.build_plan = await self.agents.build(run.application_spec, run.experience_spec, run.site_snapshot, renderer)
-        has_pending_approval, batch_snapshot = await self._execute_actions_batched(
-            run, run.build_plan.actions, AgentRole.BUILDER, attempt=1, progress_start=50, progress_end=75
+        has_pending_approval, batch_snapshot = await self._execute_actions_staged(
+            run, run.build_plan.actions, AgentRole.BUILDER, run.site_snapshot,
+            attempt=1, progress_start=50, progress_end=75
         )
 
         run.status = "built"
@@ -250,10 +395,11 @@ class MultiAgentWorkflow:
             )
             if not repair_plan.actions:
                 break
-            repair_pending, repair_snapshot = await self._execute_actions_batched(
+            repair_pending, repair_snapshot = await self._execute_actions_staged(
                 run,
                 repair_plan.actions,
                 AgentRole.BUILDER,
+                run.verification_snapshot,
                 attempt=repair_loop + 1,
                 progress_start=min(92, 88 + repair_loop * 2),
                 progress_end=min(96, 92 + repair_loop * 2),
