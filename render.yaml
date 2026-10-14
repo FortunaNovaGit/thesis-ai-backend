@@ -8,16 +8,34 @@ services:
     envVars:
       - key: AGENT_MODE
         value: auto
-      - key: OPENAI_MODEL
-        value: gpt-5.6-sol
       - key: OPENAI_API_KEY
         sync: false
+      - key: OPENAI_ORCHESTRATOR_MODEL
+        value: gpt-5.6-terra
+      - key: OPENAI_ARCHITECT_MODEL
+        value: gpt-5.6-terra
+      - key: OPENAI_DESIGN_MODEL
+        value: gpt-5.6-terra
+      - key: OPENAI_BUILDER_MODEL
+        value: gpt-5.6-luna
+      - key: OPENAI_QUALITY_MODEL
+        value: gpt-5.6-luna
+      - key: OPENAI_REPAIR_MODEL
+        value: gpt-5.6-sol
+      - key: MAX_BUILD_COST_USD
+        value: "0.50"
+      - key: MAX_TOTAL_LLM_TOKENS
+        value: "30000"
+      - key: MAX_LLM_CALLS
+        value: "10"
+      - key: MAX_REPAIR_LOOPS
+        value: "1"
+      - key: ENABLE_LLM_REPAIR_ESCALATION
+        value: "true"
       - key: BACKEND_TOKEN_SECRET
         generateValue: true
       - key: AUTO_APPROVE_MEDIUM_RISK
         value: "true"
-      - key: MAX_REPAIR_LOOPS
-        value: "2"
       - key: ALLOW_INSECURE_WORDPRESS
         value: "false"
       - key: ALLOW_PRIVATE_WORDPRESS

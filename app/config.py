@@ -10,10 +10,27 @@ class Settings(BaseSettings):
 
     # auto => OpenAI when OPENAI_API_KEY is present, otherwise deterministic mock.
     agent_mode: str = "auto"
-    openai_model: str = "gpt-5.6-sol"
     openai_api_key: str | None = None
 
-    # mock | auto | abilities_rest | bridge_rest
+    # v0.7 model router. OPENAI_MODEL remains as a backward-compatible fallback.
+    openai_model: str = "gpt-5.6-terra"
+    openai_orchestrator_model: str = "gpt-5.6-terra"
+    openai_architect_model: str = "gpt-5.6-terra"
+    openai_design_model: str = "gpt-5.6-terra"
+    openai_builder_model: str = "gpt-5.6-luna"
+    openai_quality_model: str = "gpt-5.6-luna"
+    openai_repair_model: str = "gpt-5.6-sol"
+
+    # Per-build guardrails. These are intentionally conservative for prototype
+    # development; they can be raised explicitly in Render if needed.
+    max_build_cost_usd: float = 0.50
+    max_total_llm_tokens: int = 30_000
+    max_llm_calls: int = 10
+    max_repair_loops: int = 1
+    enable_llm_repair_escalation: bool = True
+
+    # Legacy push settings retained only for old CLI/tests. v0.6+ WordPress Pull
+    # execution means the cloud backend does not call WordPress to mutate it.
     wordpress_mode: str = "mock"
     wordpress_url: str | None = None
     wordpress_username: str | None = None
@@ -22,21 +39,16 @@ class Settings(BaseSettings):
     wordpress_timeout_seconds: float = 45.0
 
     auto_approve_medium_risk: bool = True
-    max_repair_loops: int = 2
     transient_action_retries: int = 1
 
-    # EasyWP/managed-hosting friendly HTTP pacing and adaptive 429 handling.
     wordpress_min_request_interval_seconds: float = 2.0
     wordpress_rate_limit_retries: int = 2
     wordpress_rate_limit_base_delay_seconds: float = 180.0
     wordpress_rate_limit_max_delay_seconds: float = 300.0
-    # Batch multiple logical WordPress actions into one REST request. This is the
-    # primary EasyWP anti-rate-limit strategy retained from v0.5.4.
     wordpress_batch_size: int = 8
     wordpress_inter_batch_delay_seconds: float = 3.0
 
     # Stable secret for self-contained encrypted WordPress connection tokens.
-    # Configure once in Render. Redeploys then do not invalidate connected sites.
     backend_token_secret: str | None = None
     backend_key_file: str = "data/backend.key"
 
@@ -49,8 +61,18 @@ class Settings(BaseSettings):
             return "openai" if self.openai_api_key else "mock"
         return self.agent_mode
 
+    @property
+    def model_router(self) -> dict[str, str]:
+        return {
+            "orchestrator": self.openai_orchestrator_model or self.openai_model,
+            "architect": self.openai_architect_model or self.openai_model,
+            "design": self.openai_design_model or self.openai_model,
+            "builder": self.openai_builder_model or self.openai_model,
+            "quality": self.openai_quality_model or self.openai_model,
+            "repair": self.openai_repair_model or self.openai_model,
+        }
+
 
 settings = Settings()
 if settings.openai_api_key and not os.environ.get("OPENAI_API_KEY"):
-    # Make .env-based local configuration visible to the OpenAI Agents SDK too.
     os.environ["OPENAI_API_KEY"] = settings.openai_api_key

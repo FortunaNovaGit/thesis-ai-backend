@@ -1,51 +1,12 @@
-# Quick Start v0.6.0
+# Quick Start v0.7
 
-## 1. Backend
+1. Замінити backend files у GitHub на v0.7.0 і зробити Push.
+2. У Render зберегти існуючий `BACKEND_TOKEN_SECRET`; не генерувати його заново.
+3. Додати model-router та budget env variables з `CHANGELOG_V0.7.0_UA.md`.
+4. Після deploy відкрити `/health`.
+5. Очікувані поля: `version=0.7.0`, `architecture_version=artifact_pipeline_v1`, `model=multi-model`.
+6. Оновити WordPress Bridge до v0.7.0 через Upload Plugin → Replace current with uploaded.
+7. Натиснути «Перевірити з’єднання», щоб UI підтягнув новий model router.
+8. Запустити той самий стоматологічний prompt для коректного A/B порівняння з v0.6.
 
-Замінити файли у GitHub repo backend на v0.6.0 і зробити Commit → Push.
-
-У Render Environment:
-
-```text
-AGENT_MODE=auto
-OPENAI_MODEL=gpt-5.6-sol
-OPENAI_API_KEY=<твій ключ>
-BACKEND_TOKEN_SECRET=<залишити існуючий стабільний secret>
-AUTO_APPROVE_MEDIUM_RISK=true
-MAX_REPAIR_LOOPS=2
-```
-
-Старі `WORDPRESS_*RATE_LIMIT*` variables більше не потрібні.
-
-Перевірити:
-
-```text
-https://<service>.onrender.com/health
-```
-
-Очікується `version: 0.6.0`, `execution_mode: wordpress_pull`.
-
-## 2. WordPress
-
-Upload Plugin → завантажити `thesis-ai-bridge-v0.6.0.zip` → Replace current with uploaded.
-
-Після оновлення зайти в **AI Website Builder** і натиснути **Перевірити з’єднання**.
-
-Якщо статус агентів `mock`, додати OpenAI API key в Render і знову натиснути Check connection.
-
-## 3. Build
-
-Приклад:
-
-> Створи сучасний сайт стоматологічної клініки українською мовою. Потрібні Головна, Послуги, Лікарі, Про нас, Контакти та Запис. Використай Elementor. Потрібна форма запису, сучасний світлий дизайн, синій акцент, SEO та адаптивність.
-
-Flow:
-
-1. WordPress локально робить snapshot.
-2. Render запускає 4 planning agents.
-3. Policy Engine повертає тільки дозволені actions.
-4. WordPress виконує actions локально по одній.
-5. WordPress робить новий snapshot.
-6. Quality/Security agent перевіряє результат.
-7. Якщо потрібно — repair actions повертаються у WordPress і виконуються локально.
-8. Після `passed` можна вручну опублікувати drafts.
+Під час першого тесту не збільшувати budget. Якщо build зупиниться через budget, спочатку дивитися breakdown по агентах, а не просто піднімати ліміт.

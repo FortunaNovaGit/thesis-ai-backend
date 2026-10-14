@@ -9,7 +9,7 @@ from typing import Awaitable, Callable
 
 from .agents.runtime import AgentRuntime
 from .config import Settings
-from .models import AgentRole, ActionExecution, BuildAction, PolicyOutcome, ProjectRun, Renderer, SiteSnapshot
+from .models import AgentRole, ActionExecution, BuildAction, PolicyOutcome, ProjectRun, QualityReport, Renderer, SiteSnapshot
 from .policy import PolicyEngine
 from .tools.wordpress import WordPressExecutor
 
@@ -330,103 +330,92 @@ class MultiAgentWorkflow:
         return json.dumps([x.model_dump(mode="json") for x in run.executions], ensure_ascii=False)
 
     async def run(self, user_request: str, renderer: Renderer = "elementor") -> ProjectRun:
+        # Legacy/local executor retained for tests and CLI. It follows the same
+        # v0.7 artifact pipeline as the pull API, but executes against the local
+        # WordPressExecutor abstraction.
+        from .agents.runtime import (
+            architecture_to_application_spec, compact_site_summary, compile_build_plan,
+            make_task_plan, merge_advisory_actions, normalize_architecture, reconcile_experience,
+        )
+        from .capabilities import resolve_capabilities
+        from .pull_workflow import PullPlanningWorkflow
+
         run = ProjectRun(run_id=str(uuid.uuid4()), user_request=user_request, renderer=renderer)
         self._save(run)
-        await self._progress("starting", 2, "Build accepted by the orchestration service")
+        await self._progress("starting", 2, "Build accepted")
 
-        await self._progress("planning", 6, "Orchestrator is creating the task plan")
-        run.task_plan = await self.agents.plan(user_request)
+        run.project_brief = await self.agents.orchestrate(user_request, renderer)
+        run.project_brief = run.project_brief.model_copy(update={"renderer": renderer})
+        run.task_plan = make_task_plan(run.project_brief)
         run.status = "planned"
-        self._save(run)
 
-        await self._progress("preflight", 14, "Inspecting the current WordPress site")
+        await self._progress("preflight", 14, "Inspecting WordPress")
         run.site_snapshot = await self._inspect_site(run, AgentRole.ARCHITECT)
         run.status = "inspected"
-        self._save(run)
 
-        await self._progress("architecture", 26, "Architect & Capability agent is resolving requirements")
-        run.application_spec = await self.agents.architect(user_request, run.task_plan, run.site_snapshot, renderer)
+        run.architecture = await self.agents.architect(run.project_brief, compact_site_summary(run.site_snapshot))
+        run.architecture = normalize_architecture(run.project_brief, run.architecture)
+        run.capability_resolutions = resolve_capabilities(run.architecture, run.site_snapshot, renderer)
+        run.application_spec = architecture_to_application_spec(run.project_brief, run.architecture, run.capability_resolutions)
 
-        await self._progress("design", 38, "Design / Content / SEO agent is preparing the experience specification")
-        run.experience_spec = await self.agents.design(run.application_spec, renderer)
+        run.experience_spec = await self.agents.design(run.project_brief, run.architecture)
+        run.experience_spec = reconcile_experience(run.project_brief, run.architecture, run.experience_spec)
         run.status = "specified"
-        self._save(run)
 
-        await self._progress("build_plan", 48, "Implementation agent is compiling the build plan")
-        run.build_plan = await self.agents.build(run.application_spec, run.experience_spec, run.site_snapshot, renderer)
-        has_pending_approval, batch_snapshot = await self._execute_actions_staged(
+        baseline = compile_build_plan(run.application_spec, run.experience_spec, run.site_snapshot, renderer)
+        advisory = await self.agents.build({
+            "pages": [{"slug": p.slug} for p in run.architecture.pages],
+            "deterministic_actions": [a.ability for a in baseline.actions],
+            "instruction": "Only missing advisory actions; do not duplicate deterministic actions.",
+        })
+        run.build_plan = merge_advisory_actions(baseline, advisory)
+        has_pending, batch_snapshot = await self._execute_actions_staged(
             run, run.build_plan.actions, AgentRole.BUILDER, run.site_snapshot,
             attempt=1, progress_start=50, progress_end=75
         )
-
         run.status = "built"
-        self._save(run)
-
-        await self._progress("verification", 78, "Using the post-build snapshot returned by the final WordPress batch")
-        # The Bridge returns a snapshot inside the final execution batch. Avoid an
-        # immediate extra inbound REST request, which is exactly what EasyWP's
-        # Anti-DDoS layer was rate-limiting in v0.5.3.
         run.verification_snapshot = batch_snapshot or run.site_snapshot
-        await self._progress("quality", 86, "Quality & Security agent is evaluating the result")
-        report = await self.agents.quality(
-            run.application_spec,
-            run.experience_spec,
-            self._executions_json(run),
-            run.verification_snapshot,
-            renderer,
-        )
-        run.quality_reports.append(report)
-        run.usage = self.agents.usage
-        self._save(run)
 
-        repair_loop = 0
-        while not report.passed and not has_pending_approval and repair_loop < max(0, int(self.settings.max_repair_loops)):
-            repair_loop += 1
-            run.repair_attempts = repair_loop
-            run.status = "repairing"
-            await self._progress("repair", min(94, 88 + repair_loop * 3), f"Repair loop {repair_loop} is preparing corrective actions")
-            repair_plan = await self.agents.repair(
-                run.application_spec,
-                run.experience_spec,
-                run.verification_snapshot,
-                report,
-                self._executions_json(run),
-                renderer,
+        bundle = {
+            "project_brief": run.project_brief.model_dump(mode="json"),
+            "architecture": run.architecture.model_dump(mode="json"),
+            "application_spec": run.application_spec.model_dump(mode="json"),
+            "experience_spec": run.experience_spec.model_dump(mode="json"),
+            "build_plan": run.build_plan.model_dump(mode="json"),
+            "renderer": renderer,
+            "usage": self.agents.usage.model_dump(mode="json"),
+        }
+        verifier = PullPlanningWorkflow(self.settings, self.agents)
+        verification = await verifier.verify(
+            bundle=bundle,
+            executions=[x.model_dump(mode="json") for x in run.executions],
+            verification_snapshot=run.verification_snapshot,
+            repair_attempts=0,
+        )
+        report = QualityReport.model_validate(verification["quality_report"])
+        run.quality_reports.append(report)
+
+        if not report.passed and not has_pending and verification.get("repair_actions") and self.settings.max_repair_loops > 0:
+            run.repair_attempts = 1
+            repair_actions = [BuildAction.model_validate(item["action"]) for item in verification["repair_actions"]]
+            _, repair_snapshot = await self._execute_actions_staged(
+                run, repair_actions, AgentRole.BUILDER, run.verification_snapshot,
+                attempt=2, progress_start=88, progress_end=96
             )
-            if not repair_plan.actions:
-                break
-            repair_pending, repair_snapshot = await self._execute_actions_staged(
-                run,
-                repair_plan.actions,
-                AgentRole.BUILDER,
-                run.verification_snapshot,
-                attempt=repair_loop + 1,
-                progress_start=min(92, 88 + repair_loop * 2),
-                progress_end=min(96, 92 + repair_loop * 2),
-            )
-            has_pending_approval = has_pending_approval or repair_pending
-            if has_pending_approval:
-                break
             if repair_snapshot is not None:
                 run.verification_snapshot = repair_snapshot
-            report = await self.agents.quality(
-                run.application_spec,
-                run.experience_spec,
-                self._executions_json(run),
-                run.verification_snapshot,
-                renderer,
+            verification = await verifier.verify(
+                bundle=bundle,
+                executions=[x.model_dump(mode="json") for x in run.executions],
+                verification_snapshot=run.verification_snapshot,
+                repair_attempts=1,
             )
+            report = QualityReport.model_validate(verification["quality_report"])
             run.quality_reports.append(report)
-            run.usage = self.agents.usage
-            self._save(run)
 
-        if has_pending_approval:
-            run.status = "needs_approval"
-        elif report.passed:
-            run.status = "passed"
-        else:
-            run.status = "failed"
+        run.status = "needs_approval" if has_pending else ("passed" if report.passed else "failed")
         run.usage = self.agents.usage
         self._save(run)
         await self._progress("completed", 100, f"Build finished with status: {run.status}")
         return run
+

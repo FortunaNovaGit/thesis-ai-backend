@@ -13,13 +13,14 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from .agents.runtime import make_agent_runtime
+from .budget import BudgetLimits
 from .config import settings
 from .connection_token import ConnectionTokenCodec
 from .models import SiteSnapshot
 from .pull_workflow import PullPlanningWorkflow
 
 
-app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.6.2")
+app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.7.0")
 codec = ConnectionTokenCodec(settings.backend_token_secret, Path(settings.backend_key_file))
 
 # Planning jobs live only while the Render process is alive. The actual WordPress
@@ -107,13 +108,16 @@ def _credentials(site_id: str, authorization: str | None):
 async def health() -> dict[str, Any]:
     return {
         "status": "ok",
-        "version": "0.6.2",
+        "version": "0.7.0",
         "execution_mode": "wordpress_pull",
         "agent_mode": settings.resolved_agent_mode,
         "configured_agent_mode": settings.agent_mode,
-        "model": settings.openai_model if settings.resolved_agent_mode == "openai" else "mock",
+        "model": "multi-model" if settings.resolved_agent_mode == "openai" else "mock",
+        "model_router": settings.model_router if settings.resolved_agent_mode == "openai" else {"all": "mock"},
+        "budget": {"max_cost_usd": settings.max_build_cost_usd, "max_total_tokens": settings.max_total_llm_tokens, "max_llm_calls": settings.max_llm_calls},
         "stable_connection_tokens": codec.persistent,
-        "agent_output_mode": "json_text_pydantic",
+        "agent_output_mode": "artifact_pipeline_json_pydantic",
+        "architecture_version": "artifact_pipeline_v1",
     }
 
 
@@ -137,7 +141,8 @@ async def connect_site(payload: ConnectRequest):
         "site_token": site_token,
         "execution_mode": "wordpress_pull",
         "agent_mode": settings.resolved_agent_mode,
-        "model": settings.openai_model if settings.resolved_agent_mode == "openai" else "mock",
+        "model": "multi-model" if settings.resolved_agent_mode == "openai" else "mock",
+        "model_router": settings.model_router if settings.resolved_agent_mode == "openai" else {"all": "mock"},
         "bridge": {"bridge_version": payload.bridge_version},
         "token_persistence": "stable" if codec.persistent else "ephemeral",
     }
@@ -153,7 +158,8 @@ async def check_site(site_id: str, authorization: str | None = Header(default=No
         "site_url": creds.site_url,
         "bridge_version": creds.bridge_version,
         "agent_mode": settings.resolved_agent_mode,
-        "model": settings.openai_model if settings.resolved_agent_mode == "openai" else "mock",
+        "model": "multi-model" if settings.resolved_agent_mode == "openai" else "mock",
+        "model_router": settings.model_router if settings.resolved_agent_mode == "openai" else {"all": "mock"},
         "stable_connection_tokens": codec.persistent,
     }
 
@@ -169,7 +175,16 @@ async def _run_plan_job(job_id: str, site_id: str, payload: PullPlanRequest) -> 
 
     try:
         snapshot = SiteSnapshot.model_validate(payload.site_snapshot)
-        agents = make_agent_runtime(settings.resolved_agent_mode, settings.openai_model)
+        agents = make_agent_runtime(
+            settings.resolved_agent_mode,
+            settings.openai_model,
+            model_router=settings.model_router,
+            budget_limits=BudgetLimits(
+                max_cost_usd=settings.max_build_cost_usd,
+                max_total_tokens=settings.max_total_llm_tokens,
+                max_llm_calls=settings.max_llm_calls,
+            ),
+        )
         planner = PullPlanningWorkflow(settings, agents)
         bundle = await planner.plan(payload.request, payload.renderer, snapshot, progress=progress)
         job.update({
@@ -241,7 +256,16 @@ async def verify_site(site_id: str, payload: VerifyRequest, authorization: str |
     _credentials(site_id, authorization)
     try:
         snapshot = SiteSnapshot.model_validate(payload.verification_snapshot)
-        agents = make_agent_runtime(settings.resolved_agent_mode, settings.openai_model)
+        prior_usage = payload.bundle.get("usage", {}) if isinstance(payload.bundle, dict) else {}
+        remaining_cost = max(0.01, settings.max_build_cost_usd - float(prior_usage.get("estimated_cost_usd", 0.0) or 0.0))
+        remaining_tokens = max(1000, settings.max_total_llm_tokens - int(prior_usage.get("total_tokens", 0) or 0))
+        remaining_calls = max(1, settings.max_llm_calls - int(prior_usage.get("requests", 0) or 0))
+        agents = make_agent_runtime(
+            settings.resolved_agent_mode,
+            settings.openai_model,
+            model_router=settings.model_router,
+            budget_limits=BudgetLimits(remaining_cost, remaining_tokens, remaining_calls),
+        )
         planner = PullPlanningWorkflow(settings, agents)
         return await planner.verify(
             bundle=payload.bundle,
