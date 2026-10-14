@@ -8,7 +8,7 @@ from typing import Any, TypeVar
 from pydantic import BaseModel, ValidationError
 
 from ..budget import BudgetLimits, BudgetTracker
-from ..capabilities import plugin_plan_from_resolutions, resolve_capabilities
+from ..capabilities import canonicalize_capability, plugin_plan_from_resolutions, resolve_capabilities
 from ..component_library import compile_elementor_page, compile_gutenberg_page
 from ..models import (
     AgentRole,
@@ -182,8 +182,26 @@ def _normalize_architecture(brief: ProjectBrief, architecture: ArchitectureBundl
 
     capability_seen: set[str] = set()
     capabilities: list[CapabilityRequirement] = []
-    for item in architecture.capabilities:
-        key = item.capability.strip().lower().replace("-", "_")
+
+    # Core website primitives are deterministic and should not depend on the
+    # Architect remembering exact vocabulary. This also makes the artifact
+    # self-describing for QA and the thesis trace.
+    baseline_capabilities = [
+        CapabilityRequirement(capability="pages", reason="Architecture contains generated WordPress pages", priority="required"),
+        CapabilityRequirement(capability="site_identity", reason="Generated site needs title/tagline identity", priority="required"),
+        CapabilityRequirement(capability="seo", reason="Generated pages require basic SEO metadata", priority="required"),
+    ]
+    if len(pages) > 1:
+        baseline_capabilities.append(CapabilityRequirement(
+            capability="navigation", reason="Multiple pages require site navigation", priority="required"
+        ))
+    if brief.renderer in {"elementor", "auto"}:
+        baseline_capabilities.append(CapabilityRequirement(
+            capability="page_builder_elementor", reason="Selected renderer is Elementor", priority="required"
+        ))
+
+    for item in [*baseline_capabilities, *architecture.capabilities]:
+        key = canonicalize_capability(item.capability)
         if key and key not in capability_seen:
             capability_seen.add(key)
             capabilities.append(item.model_copy(update={"capability": key}))

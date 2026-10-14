@@ -36,10 +36,12 @@ Input: ProjectBrief plus a COMPACT preflight summary of the real WordPress site.
 Output: ArchitectureBundle only.
 Create a coherent information architecture, one unique page intent per slug,
 content matrix, capability requirements, structured content needs, and security /
-performance requirements. Capabilities are semantic names such as forms,
-ecommerce, structured_content, seo, navigation, page_builder_elementor.
+performance requirements. Use ONLY these capability IDs when needed:
+pages, navigation, site_identity, seo, blog, media, page_builder_elementor, forms,
+ecommerce, structured_content, seo_plugin.
+Do not invent synonyms such as core_pages, wordpress_pages or contact_forms.
 DO NOT choose plugin slugs. A deterministic capability resolver maps capabilities
-to approved dependencies after you finish.
+to WordPress Core/Bridge or approved dependencies after you finish.
 Every page must have a clear purpose, search intent, primary CTA, section goals,
 and internal links that make the website work as one system rather than unrelated
 AI pages.

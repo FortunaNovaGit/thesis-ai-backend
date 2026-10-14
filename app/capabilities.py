@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 
 from .models import (
@@ -12,9 +13,9 @@ from .models import (
 )
 
 
-# The LLM asks for business capabilities. Only deterministic code maps those
-# capabilities to concrete WordPress dependencies. This prevents hallucinated
-# plugin slugs and makes the selection method explainable in the thesis.
+# The LLM describes *semantic* capabilities. Deterministic code owns the mapping
+# to WordPress Core/Bridge or to an approved dependency. This boundary prevents
+# hallucinated plugin slugs from reaching the execution layer.
 CAPABILITY_PLUGIN_MAP: dict[str, str] = {
     "page_builder_elementor": "elementor",
     "forms": "contact-form-7",
@@ -22,16 +23,62 @@ CAPABILITY_PLUGIN_MAP: dict[str, str] = {
     "structured_content": "advanced-custom-fields",
 }
 
-# SEO intentionally has a native bridge fallback: title/meta are written even
-# without a third-party SEO plugin. Existing recognized SEO plugins are reused.
+# Capabilities implemented directly by WordPress Core and/or Thesis AI Bridge.
 CORE_CAPABILITIES = {
     "pages",
     "navigation",
     "site_identity",
     "seo",
-    "basic_seo",
     "blog",
     "media",
+}
+
+# The Architect is deliberately allowed to speak in natural semantic names, but
+# the resolver must be forgiving about common aliases. The previous v0.7.0 bug
+# happened because the model returned `core_pages`, which is semantically valid
+# but was treated as an unknown capability and aborted the whole build.
+CAPABILITY_ALIASES: dict[str, str] = {
+    # Core page/site primitives.
+    "page": "pages",
+    "core_page": "pages",
+    "core_pages": "pages",
+    "wordpress_page": "pages",
+    "wordpress_pages": "pages",
+    "page_creation": "pages",
+    "core_navigation": "navigation",
+    "menus": "navigation",
+    "menu": "navigation",
+    "navigation_menu": "navigation",
+    "navigation_menus": "navigation",
+    "site_settings": "site_identity",
+    "core_site_identity": "site_identity",
+    "site_branding": "site_identity",
+    "basic_seo": "seo",
+    "seo_metadata": "seo",
+    "on_page_seo": "seo",
+    "meta_seo": "seo",
+    "posts": "blog",
+    "blog_posts": "blog",
+    "images": "media",
+    "media_library": "media",
+
+    # Approved plugin-backed capabilities.
+    "form": "forms",
+    "contact_form": "forms",
+    "contact_forms": "forms",
+    "booking_form": "forms",
+    "elementor": "page_builder_elementor",
+    "elementor_free": "page_builder_elementor",
+    "page_builder": "page_builder_elementor",
+    "woocommerce": "ecommerce",
+    "shop": "ecommerce",
+    "store": "ecommerce",
+    "online_store": "ecommerce",
+    "acf": "structured_content",
+    "custom_fields": "structured_content",
+    "custom_field": "structured_content",
+    "data_model": "structured_content",
+    "seo_plugin_support": "seo_plugin",
 }
 
 APPROVED_PLUGIN_SLUGS = {
@@ -44,6 +91,21 @@ APPROVED_PLUGIN_SLUGS = {
 }
 
 SEO_PLUGINS = ("wordpress-seo", "seo-by-rank-math")
+SUPPORTED_CAPABILITIES = CORE_CAPABILITIES | set(CAPABILITY_PLUGIN_MAP) | {"seo_plugin"}
+
+
+def canonicalize_capability(value: str) -> str:
+    """Normalize an agent-produced semantic capability into our fixed vocabulary."""
+    key = re.sub(r"[^a-z0-9]+", "_", (value or "").strip().lower()).strip("_")
+    if not key:
+        return ""
+    key = CAPABILITY_ALIASES.get(key, key)
+    # Future-proof common `core_*` wording without opening arbitrary mappings.
+    if key.startswith("core_"):
+        candidate = key[5:]
+        if candidate in CORE_CAPABILITIES:
+            key = candidate
+    return CAPABILITY_ALIASES.get(key, key)
 
 
 def _active_plugin_slugs(snapshot: SiteSnapshot) -> set[str]:
@@ -60,14 +122,21 @@ def _installed_plugin_slugs(snapshot: SiteSnapshot) -> set[str]:
 
 def _recognized(snapshot: SiteSnapshot) -> dict[str, object]:
     value = snapshot.capabilities.get("recognized_capabilities", {})
-    return value if isinstance(value, dict) else {}
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[str, object] = {}
+    for key, state in value.items():
+        canonical = canonicalize_capability(str(key))
+        if canonical:
+            normalized[canonical] = state
+    return normalized
 
 
 def _dedupe_requirements(requirements: Iterable[CapabilityRequirement]) -> list[CapabilityRequirement]:
     result: list[CapabilityRequirement] = []
     seen: set[str] = set()
     for item in requirements:
-        key = item.capability.strip().lower().replace("-", "_")
+        key = canonicalize_capability(item.capability)
         if not key or key in seen:
             continue
         seen.add(key)
@@ -81,16 +150,28 @@ def resolve_capabilities(
     renderer: Renderer,
 ) -> list[CapabilityResolution]:
     requirements = list(architecture.capabilities)
-    if renderer in {"elementor", "auto"} and not any(
-        r.capability == "page_builder_elementor" for r in requirements
-    ):
-        requirements.insert(0, CapabilityRequirement(
+
+    # Baseline website capabilities are deterministic. We do not require the LLM
+    # to remember that creating pages/navigation/site identity are Core features.
+    baseline = [
+        CapabilityRequirement(capability="pages", reason="The architecture contains WordPress pages", priority="required"),
+        CapabilityRequirement(capability="site_identity", reason="The generated site needs a title/tagline", priority="required"),
+        CapabilityRequirement(capability="seo", reason="Every generated page receives basic SEO metadata", priority="required"),
+    ]
+    if len(architecture.pages) > 1:
+        baseline.append(CapabilityRequirement(
+            capability="navigation",
+            reason="Multiple generated pages require navigation",
+            priority="required",
+        ))
+    if renderer in {"elementor", "auto"}:
+        baseline.append(CapabilityRequirement(
             capability="page_builder_elementor",
             reason="Selected Elementor renderer requires Elementor Free",
             priority="required",
         ))
 
-    requirements = _dedupe_requirements(requirements)
+    requirements = _dedupe_requirements([*baseline, *requirements])
     active = _active_plugin_slugs(snapshot)
     installed = _installed_plugin_slugs(snapshot)
     recognized = _recognized(snapshot)
@@ -98,7 +179,7 @@ def resolve_capabilities(
 
     for req in requirements:
         capability = req.capability
-        # Bridge/Core can satisfy these directly without adding dependency weight.
+
         if capability in CORE_CAPABILITIES:
             resolutions.append(CapabilityResolution(
                 capability=capability,
@@ -129,7 +210,6 @@ def resolve_capabilities(
                     reason="Existing installed SEO plugin can be reused",
                 ))
                 continue
-            # SEO plugin is optional in v0.7 because native metadata fallback exists.
             resolutions.append(CapabilityResolution(
                 capability=capability,
                 source="core",
@@ -154,7 +234,10 @@ def resolve_capabilities(
                 capability=capability,
                 source="unavailable",
                 action="none",
-                reason=f"No approved deterministic implementation mapping exists for '{capability}'",
+                reason=(
+                    f"No approved deterministic implementation mapping exists for '{capability}'. "
+                    f"Supported semantic capabilities: {', '.join(sorted(SUPPORTED_CAPABILITIES))}"
+                ),
             ))
             continue
 

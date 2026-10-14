@@ -20,7 +20,7 @@ from .models import SiteSnapshot
 from .pull_workflow import PullPlanningWorkflow
 
 
-app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.7.0")
+app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.7.1")
 codec = ConnectionTokenCodec(settings.backend_token_secret, Path(settings.backend_key_file))
 
 # Planning jobs live only while the Render process is alive. The actual WordPress
@@ -108,7 +108,7 @@ def _credentials(site_id: str, authorization: str | None):
 async def health() -> dict[str, Any]:
     return {
         "status": "ok",
-        "version": "0.7.0",
+        "version": "0.7.1",
         "execution_mode": "wordpress_pull",
         "agent_mode": settings.resolved_agent_mode,
         "configured_agent_mode": settings.agent_mode,
@@ -167,6 +167,7 @@ async def check_site(site_id: str, authorization: str | None = Header(default=No
 async def _run_plan_job(job_id: str, site_id: str, payload: PullPlanRequest) -> None:
     job = _plan_jobs[job_id]
     job.update({"status": "running", "stage": "starting", "progress": 1, "updated_at": _utcnow()})
+    agents = None
 
     async def progress(stage: str, pct: int, detail: str) -> None:
         current = _plan_jobs.get(job_id)
@@ -197,14 +198,20 @@ async def _run_plan_job(job_id: str, site_id: str, payload: PullPlanRequest) -> 
             "updated_at": _utcnow(),
         })
     except Exception as exc:
-        job.update({
+        failure_payload = {
             "status": "failed",
             "stage": "failed",
             "detail": str(exc),
             "error": str(exc),
             "finished_at": _utcnow(),
             "updated_at": _utcnow(),
-        })
+        }
+        # Failed planning can still consume API tokens. Preserve the real usage
+        # so the WordPress UI never misleadingly reports 0 tokens / $0.000.
+        if agents is not None:
+            failure_payload["usage"] = agents.usage.model_dump(mode="json")
+            failure_payload["budget"] = agents.budget_state()
+        job.update(failure_payload)
     finally:
         if _active_plan_by_site.get(site_id) == job_id:
             _active_plan_by_site.pop(site_id, None)
