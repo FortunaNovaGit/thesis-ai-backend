@@ -126,10 +126,10 @@ def test_workflow_uses_batches_and_no_extra_verification_request(tmp_path: Path)
     workflow = MultiAgentWorkflow(settings, MockAgentRuntime(), executor, tmp_path)
     result = asyncio.run(workflow.run("Створи простий сайт стоматології"))
     assert result.status == "passed"
-    # One preflight snapshot, then two guarded phases: content and final site
-    # assembly. The final assembly batch returns the verification snapshot, so
-    # there is no third remote verification call.
-    assert executor.batch_calls == 2
+    # One preflight snapshot, then three guarded phases: dependencies/design,
+    # content, and final site assembly. The last batch returns verification state,
+    # so there is no standalone post-build verification request.
+    assert executor.batch_calls == 3
     assert executor.snapshot_calls == 2
 
 

@@ -63,7 +63,7 @@ def test_artifact_pipeline_has_content_matrix_and_unique_pages():
     assert len(slugs) == len(set(slugs))
     assert "home" in slugs
     assert len(bundle["content_matrix"]) == len(pages)
-    assert bundle["architecture_version"] == "artifact_pipeline_v1"
+    assert bundle["architecture_version"] == "artifact_pipeline_v2"
     assert bundle["project_brief"]["primary_goal"]
 
 

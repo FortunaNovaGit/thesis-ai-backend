@@ -1,12 +1,16 @@
-# Quick Start v0.7
+# Quick Start — v0.7.2
 
-1. Замінити backend files у GitHub на v0.7.0 і зробити Push.
-2. У Render зберегти існуючий `BACKEND_TOKEN_SECRET`; не генерувати його заново.
-3. Додати model-router та budget env variables з `CHANGELOG_V0.7.0_UA.md`.
-4. Після deploy відкрити `/health`.
-5. Очікувані поля: `version=0.7.0`, `architecture_version=artifact_pipeline_v1`, `model=multi-model`.
-6. Оновити WordPress Bridge до v0.7.0 через Upload Plugin → Replace current with uploaded.
-7. Натиснути «Перевірити з’єднання», щоб UI підтягнув новий model router.
-8. Запустити той самий стоматологічний prompt для коректного A/B порівняння з v0.6.
+1. Замініть backend у GitHub вмістом цього архіву, Commit → Push → Render redeploy.
+2. Не змінюйте `BACKEND_TOKEN_SECRET`.
+3. Для дешевого 3-page тесту рекомендовано:
+   - `MAX_BUILD_COST_USD=0.30`
+   - `MAX_TOTAL_LLM_TOKENS=20000`
+   - `MAX_LLM_CALLS=8`
+   - `MAX_REPAIR_LOOPS=1`
+   - `ENABLE_BUILDER_LLM_REVIEW=false`
+4. Перевірте `/health`: version `0.7.2`, architecture `artifact_pipeline_v2`, agent mode `openai`.
+5. Оновіть Thesis AI Bridge до `0.7.2` через Upload Plugin → Replace current with uploaded.
+6. Старі AI-owned draft pages видаляти не обов'язково: builder оновлює canonical slugs і може використати їх повторно.
+7. Запустіть той самий 3-page prompt і порівняйте: duration, calls/tokens/cost, headings, CTA, form, design, QA issues.
 
-Під час першого тесту не збільшувати budget. Якщо build зупиниться через budget, спочатку дивитися breakdown по агентах, а не просто піднімати ліміт.
+Build має продовжуватися у фоні навіть якщо вкладка WordPress не активна. Якщо WP-Cron затримується, відкрита builder page має безпечно підштовхнути один stale step.

@@ -1,39 +1,41 @@
-# WordPress Multi-Agent Thesis MVP — v0.7.0
+# WordPress Multi-Agent Thesis MVP — v0.7.2
 
 Artifact-driven multi-agent WordPress/Elementor site builder.
 
-The backend plans and verifies. The WordPress plugin executes mutations locally, so EasyWP does not receive a burst of inbound Render → WordPress requests.
+## Pipeline
 
-## Five agents
+1. **Orchestrator** → compact `ProjectBrief`
+2. **Architect & Capability** → site architecture, content matrix and capability requirements
+3. **Design / Content / SEO** → site-wide `DesignSystem` + page-specific `ExperienceSpec`
+4. **WordPress Implementation** → deterministic compiler turns validated artifacts into approved WordPress abilities / Elementor components
+5. **Quality & Security** → deterministic checks + compact semantic QA; bounded delta repair
 
-1. **Orchestrator** → ProjectBrief
-2. **Architect & Capability** → site architecture + content matrix
-3. **Design / Content / SEO** → coherent site-wide ExperienceSpec
-4. **WordPress Implementation** → small advisory plan; exact renderer payloads are deterministic
-5. **Quality & Security** → semantic QA on compact evidence
+WordPress executes mutations locally. The Render backend never needs to burst requests into EasyWP during a build.
 
-Deterministic layers handle capability→plugin mapping, policy, Elementor components, structural QA and most repair actions.
+## v0.7.2 focus
 
-## Cost control
+- richer visitor-facing copy and Elementor components;
+- no planning notes rendered as website copy;
+- actual Elementor headings/buttons/forms/SEO returned to QA;
+- draft-first is treated as expected, not a QA failure;
+- Builder LLM review disabled by default to reduce time/tokens;
+- background WordPress worker keeps build moving when the admin tab is refreshed/closed, with a stale-worker browser fallback;
+- global DesignSystem can style the theme header/navigation as well as Elementor content.
 
-Default router:
-
-- Orchestrator: `gpt-5.6-terra`
-- Architect: `gpt-5.6-terra`
-- Design: `gpt-5.6-terra`
-- Builder: `gpt-5.6-luna`
-- Quality: `gpt-5.6-luna`
-- Repair escalation: `gpt-5.6-sol`
-
-Default runtime guardrails (they stop subsequent LLM calls once the measured estimate reaches the limit):
+## Recommended Render environment
 
 ```text
-MAX_BUILD_COST_USD=0.50
-MAX_TOTAL_LLM_TOKENS=30000
-MAX_LLM_CALLS=10
+AGENT_MODE=auto
+OPENAI_API_KEY=...
+BACKEND_TOKEN_SECRET=<stable generated secret>
+AUTO_APPROVE_MEDIUM_RISK=true
+MAX_BUILD_COST_USD=0.30
+MAX_TOTAL_LLM_TOKENS=20000
+MAX_LLM_CALLS=8
 MAX_REPAIR_LOOPS=1
+ENABLE_BUILDER_LLM_REVIEW=false
 ```
 
-`estimated_cost_usd` is an estimate based on configured model/token usage; the OpenAI billing dashboard remains authoritative.
+Model router defaults remain role-specific. Keep `BACKEND_TOKEN_SECRET` unchanged across redeploys.
 
-See `ARCHITECTURE_V0.7_UA.md` and `CHANGELOG_V0.7.0_UA.md`.
+See `CHANGELOG_V0.7.2_UA.md`.

@@ -95,7 +95,13 @@ class PullPlanningWorkflow:
             "deterministic_actions": [a.ability for a in baseline.actions],
             "instruction": "Do not duplicate deterministic actions. Return only genuinely missing advisory setup actions.",
         }
-        advisory: BuildPlan = await self.agents.build(manifest)
+        if self.settings.enable_builder_llm_review:
+            advisory: BuildPlan = await self.agents.build(manifest)
+        else:
+            # The WordPress Implementation Agent is deterministic by default: it
+            # compiles typed artifacts into allow-listed abilities without spending
+            # another LLM call on a manifest that is already complete.
+            advisory = BuildPlan(actions=[])
         build_plan = merge_advisory_actions(baseline, advisory)
         gated = self._gate_actions(build_plan.actions)
 
@@ -121,7 +127,7 @@ class PullPlanningWorkflow:
             "model_router": self.settings.model_router if self.settings.resolved_agent_mode == "openai" else {"all": "mock"},
             "usage": self.agents.usage.model_dump(mode="json"),
             "budget": self.agents.budget_state(),
-            "architecture_version": "artifact_pipeline_v1",
+            "architecture_version": "artifact_pipeline_v2",
         }
 
     @staticmethod
@@ -223,6 +229,104 @@ class PullPlanningWorkflow:
                     responsible_agent=AgentRole.ARCHITECT,
                     suggested_fix="Use only canonical architecture slugs for internal linking.",
                 ))
+
+        # Zero-cost content-quality checks before semantic QA. These validate the
+        # artifact we actually compiled instead of asking the QA model to infer
+        # quality from page titles alone.
+        internal_markers = (
+            "ця сторінка", "сторінка має", "додайте", "після генерації",
+            "контент секції", "мета сторінки", "надати канал",
+            "допомогти зрозуміти", "сформувати довіру", "зменшити friction",
+        )
+        for page in experience.pages:
+            headings = [s.heading.strip().casefold() for s in page.section_specs if s.heading.strip()]
+            if len(headings) != len(set(headings)):
+                issues.append(QualityIssue(
+                    id=f"DET-section-headings-{page.page_slug}", category="content", severity="high",
+                    description=f"Page {page.page_slug} contains repeated section headings.",
+                    responsible_agent=AgentRole.DESIGN,
+                    suggested_fix="Regenerate only the duplicated section headings and keep the rest of the page.",
+                ))
+            bad_copy = []
+            for section in page.section_specs:
+                combined = f"{section.heading} {section.body}".casefold()
+                if any(marker in combined for marker in internal_markers):
+                    bad_copy.append(section.section_type)
+            if bad_copy:
+                issues.append(QualityIssue(
+                    id=f"DET-planning-copy-{page.page_slug}", category="content", severity="high",
+                    description=f"Page {page.page_slug} exposes planning/editor language in sections: {', '.join(sorted(set(bad_copy)))}.",
+                    responsible_agent=AgentRole.DESIGN,
+                    suggested_fix="Replace planning language with visitor-facing copy for only those sections.",
+                ))
+            arch_page = next((p for p in architecture.pages if p.slug == page.page_slug), None)
+            if arch_page and arch_page.primary_cta and not any(s.cta_label for s in page.section_specs):
+                issues.append(QualityIssue(
+                    id=f"DET-cta-{page.page_slug}", category="content", severity="high",
+                    description=f"Page {page.page_slug} has no CTA although the architecture requires one.",
+                    responsible_agent=AgentRole.DESIGN,
+                    suggested_fix="Add the architecture CTA to the hero or final CTA section.",
+                ))
+            if len(page.section_specs) < 3:
+                issues.append(QualityIssue(
+                    id=f"DET-sections-{page.page_slug}", category="content", severity="medium",
+                    description=f"Page {page.page_slug} has fewer than three meaningful sections.",
+                    responsible_agent=AgentRole.DESIGN,
+                    suggested_fix="Add only the missing architecture sections; do not rebuild the entire site.",
+                ))
+
+
+        # Verify the actual Elementor result using compact signals collected by
+        # the Bridge. This costs no model tokens and avoids QA guessing from page
+        # titles/status alone.
+        actual_by_slug = {str(p.get("slug", "")): p for p in snapshot.pages}
+        for page in experience.pages:
+            actual = actual_by_slug.get(page.page_slug) or {}
+            elementor = actual.get("elementor", {}) if isinstance(actual.get("elementor", {}), dict) else {}
+            if actual and page.page_slug in required_slugs:
+                element_count = int(elementor.get("element_count", 0) or 0)
+                if elementor and element_count < 6:
+                    issues.append(QualityIssue(
+                        id=f"DET-render-sparse-{page.page_slug}", category="functional", severity="high",
+                        description=f"Rendered Elementor page {page.page_slug} is unexpectedly sparse ({element_count} elements).",
+                        responsible_agent=AgentRole.BUILDER,
+                        suggested_fix="Re-render only this page from the existing ExperienceSpec.",
+                    ))
+                actual_headings = [str(x).strip().casefold() for x in elementor.get("headings", []) if str(x).strip()]
+                if len(actual_headings) != len(set(actual_headings)):
+                    issues.append(QualityIssue(
+                        id=f"DET-render-headings-{page.page_slug}", category="content", severity="high",
+                        description=f"Rendered page {page.page_slug} contains repeated headings.",
+                        responsible_agent=AgentRole.DESIGN,
+                        suggested_fix="Use the reconciled unique section headings and re-render this page only.",
+                    ))
+                arch_page = next((p for p in architecture.pages if p.slug == page.page_slug), None)
+                if arch_page and arch_page.primary_cta and elementor and not elementor.get("buttons"):
+                    issues.append(QualityIssue(
+                        id=f"DET-render-cta-{page.page_slug}", category="content", severity="high",
+                        description=f"Rendered page {page.page_slug} is missing its required CTA button.",
+                        responsible_agent=AgentRole.BUILDER,
+                        suggested_fix="Re-render this page with the CTA already present in the ExperienceSpec.",
+                    ))
+                needs_form = any(s.section_type == "booking" for s in page.section_specs)
+                if needs_form and elementor and not elementor.get("shortcodes"):
+                    issues.append(QualityIssue(
+                        id=f"DET-render-form-{page.page_slug}", category="functional", severity="high",
+                        description=f"Rendered page {page.page_slug} requires a form section but no form shortcode is present.",
+                        responsible_agent=AgentRole.BUILDER,
+                        suggested_fix="Re-render only the booking/contact section after ensuring the approved form plugin.",
+                    ))
+                # Older/mock snapshots may not expose persisted SEO metadata.
+                # Only validate these fields when the Bridge explicitly returned them.
+                if ("seo_title" in actual or "meta_description" in actual) and (
+                    not str(actual.get("seo_title", "")).strip() or not str(actual.get("meta_description", "")).strip()
+                ):
+                    issues.append(QualityIssue(
+                        id=f"DET-render-seo-{page.page_slug}", category="seo", severity="medium",
+                        description=f"Generated page {page.page_slug} is missing stored SEO title or meta description.",
+                        responsible_agent=AgentRole.BUILDER,
+                        suggested_fix="Run set-page-seo only for this page.",
+                    ))
         return issues
 
     @staticmethod
@@ -242,7 +346,27 @@ class PullPlanningWorkflow:
             }
             for x in latest if not x.get("executed")
         ]
+        successes = [
+            str((x.get("action") or {}).get("ability", ""))
+            for x in latest if x.get("executed")
+        ]
+        actual_pages = []
+        for page in snapshot.pages:
+            actual_pages.append({
+                "slug": page.get("slug"),
+                "title": page.get("title"),
+                "status": page.get("status"),
+                "ai_generated": page.get("ai_generated", False),
+                "seo_title": page.get("seo_title", ""),
+                "meta_description": page.get("meta_description", ""),
+                "elementor": page.get("elementor", {}),
+            })
         return {
+            "prototype_contract": {
+                "draft_first_expected": True,
+                "human_publish_after_qa": True,
+                "draft_status_is_not_a_defect": True,
+            },
             "project_brief": {
                 "site_type": brief.site_type,
                 "primary_goal": brief.primary_goal,
@@ -253,21 +377,25 @@ class PullPlanningWorkflow:
                 "pages": [{"slug": p.slug, "purpose": p.purpose, "primary_cta": p.primary_cta} for p in architecture.pages],
                 "content_matrix": [m.model_dump(mode="json") for m in architecture.content_matrix],
             },
-            "content_summary": [
+            "intended_content_summary": [
                 {
                     "slug": p.page_slug,
                     "goal": p.page_goal,
                     "h1": p.seo.h1,
                     "title": p.seo.title,
+                    "meta_description": p.seo.meta_description,
                     "section_headings": [s.heading for s in p.section_specs],
-                    "ctas": [s.cta_label for s in p.section_specs if s.cta_label],
+                    "ctas": [{"label": s.cta_label, "url": s.cta_url} for s in p.section_specs if s.cta_label],
+                    "section_types": [s.section_type for s in p.section_specs],
                 }
                 for p in experience.pages
             ],
-            "actual_pages": [{"slug": p.get("slug"), "title": p.get("title"), "status": p.get("status")} for p in snapshot.pages],
+            "actual_page_signals": actual_pages,
+            "site_structure": snapshot.structure,
+            "successful_abilities": successes,
             "latest_failures": failures,
             "deterministic_issues": [i.model_dump(mode="json") for i in deterministic],
-            "evidence_limit": "No browser screenshots or Playwright evidence supplied.",
+            "evidence_limit": "No browser screenshots or Playwright evidence supplied; visual claims are out of scope.",
         }
 
     @staticmethod
@@ -309,6 +437,7 @@ class PullPlanningWorkflow:
             "thesis-ai-bridge/ensure-draft-page",
             "thesis-ai-bridge/set-page-seo",
             "thesis-ai-bridge/update-site-identity",
+            "thesis-ai-bridge/apply-site-design",
             "thesis-ai-bridge/ensure-navigation-menu",
             "thesis-ai-bridge/set-homepage-by-slug",
             "thesis-ai-bridge/ensure-approved-plugin",
@@ -328,10 +457,20 @@ class PullPlanningWorkflow:
                 actions.append(action)
                 seen.add(key)
 
-        missing_page_slugs: set[str] = set()
+        repair_page_slugs: set[str] = set()
+        needs_form_retry = False
         for issue in report.issues:
             if issue.id == "DET-pages" and ":" in issue.description:
-                missing_page_slugs.update(x.strip() for x in issue.description.split(":", 1)[1].split(",") if x.strip())
+                repair_page_slugs.update(x.strip() for x in issue.description.split(":", 1)[1].split(",") if x.strip())
+            for prefix in [
+                "DET-render-sparse-", "DET-render-headings-", "DET-render-cta-",
+                "DET-render-form-", "DET-render-seo-", "DET-section-headings-",
+                "DET-planning-copy-", "DET-cta-", "DET-sections-",
+            ]:
+                if issue.id.startswith(prefix):
+                    repair_page_slugs.add(issue.id[len(prefix):])
+                    if prefix == "DET-render-form-":
+                        needs_form_retry = True
             if issue.id == "DET-home":
                 candidate = next((a for a in build_plan.actions if a.ability == "thesis-ai-bridge/set-homepage-by-slug"), None)
                 if candidate:
@@ -339,11 +478,18 @@ class PullPlanningWorkflow:
                     if key not in seen:
                         actions.append(candidate); seen.add(key)
 
-        if missing_page_slugs:
+        if needs_form_retry:
+            candidate = next((a for a in build_plan.actions if a.ability == "thesis-ai-bridge/ensure-contact-form"), None)
+            if candidate:
+                key = (candidate.ability, json.dumps(candidate.parameters, sort_keys=True, ensure_ascii=False))
+                if key not in seen:
+                    actions.append(candidate); seen.add(key)
+
+        if repair_page_slugs:
             for candidate in build_plan.actions:
                 if candidate.ability not in {"thesis-ai-bridge/elementor-ensure-draft-page", "thesis-ai-bridge/ensure-draft-page", "thesis-ai-bridge/set-page-seo"}:
                     continue
-                if str(candidate.parameters.get("slug", "")) not in missing_page_slugs:
+                if str(candidate.parameters.get("slug", "")) not in repair_page_slugs:
                     continue
                 key = (candidate.ability, json.dumps(candidate.parameters, sort_keys=True, ensure_ascii=False))
                 if key not in seen:

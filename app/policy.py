@@ -49,6 +49,7 @@ class PolicyEngine:
         "thesis-ai-bridge/set-homepage": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
         "thesis-ai-bridge/set-homepage-by-slug": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
         "thesis-ai-bridge/update-site-identity": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
+        "thesis-ai-bridge/apply-site-design": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
         "thesis-ai-bridge/ensure-navigation-menu": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
         "thesis-ai-bridge/install-approved-plugin": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
         "thesis-ai-bridge/activate-approved-plugin": Rule(RiskLevel.MEDIUM, BUILD_ROLE),

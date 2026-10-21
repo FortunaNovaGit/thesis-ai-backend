@@ -91,6 +91,7 @@ class MockWordPressExecutor(WordPressExecutor):
         self.tagline = ""
         self.menu: list[str] = []
         self.seo: dict[str, dict[str, str]] = {}
+        self.site_design: dict[str, Any] = {}
         self._next_id = 1
 
     async def _wait_for_slot(self) -> None:
@@ -190,6 +191,9 @@ class MockWordPressExecutor(WordPressExecutor):
         if ability == "thesis-ai-bridge/update-site-identity":
             self.site_title=str(p.get("site_title",self.site_title)); self.tagline=str(p.get("tagline",self.tagline))
             return {"site_title":self.site_title,"tagline":self.tagline}
+        if ability == "thesis-ai-bridge/apply-site-design":
+            self.site_design = dict(p)
+            return {"applied": True, "design": self.site_design}
         if ability == "thesis-ai-bridge/ensure-navigation-menu":
             self.menu=[str(x) for x in p.get("page_slugs",[])]; return {"menu_name":p.get("menu_name","AI Primary"),"page_slugs":self.menu,"assigned":True}
         if ability == "thesis-ai-bridge/set-page-seo":

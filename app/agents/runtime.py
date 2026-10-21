@@ -150,7 +150,25 @@ def _normalize_architecture(brief: ProjectBrief, architecture: ArchitectureBundl
         if slug in seen:
             continue
         seen.add(slug)
-        pages.append(page.model_copy(update={"slug": slug}))
+        goals = list(dict.fromkeys([str(x).strip().lower() for x in page.section_goals if str(x).strip()]))
+        # Guardrails for the common business-site path. The Architect still decides
+        # the page set and intent; these defaults prevent a sparse plan from turning
+        # into a page with one repeated heading.
+        required_by_slug: dict[str, list[str]] = {
+            "home": ["hero", "services", "benefits", "cta"],
+            "services": ["hero", "services", "process", "cta"],
+            "contact": ["hero", "contact"],
+            "about": ["hero", "content", "benefits", "cta"],
+            "doctors": ["hero", "team", "trust", "cta"],
+            "booking": ["hero", "booking", "faq"],
+        }
+        for required in required_by_slug.get(slug, ["hero", "content", "cta"]):
+            if required not in goals:
+                goals.append(required)
+        if slug == "contact" and any(x in {"forms", "booking"} or "форм" in x.lower() or "запис" in x.lower() for x in brief.requirements):
+            if "booking" not in goals:
+                goals.append("booking")
+        pages.append(page.model_copy(update={"slug": slug, "section_goals": goals}))
     if "home" not in seen:
         pages.insert(0, PageIntent(
             name="Головна" if brief.language.startswith("uk") else "Home",
@@ -182,10 +200,6 @@ def _normalize_architecture(brief: ProjectBrief, architecture: ArchitectureBundl
 
     capability_seen: set[str] = set()
     capabilities: list[CapabilityRequirement] = []
-
-    # Core website primitives are deterministic and should not depend on the
-    # Architect remembering exact vocabulary. This also makes the artifact
-    # self-describing for QA and the thesis trace.
     baseline_capabilities = [
         CapabilityRequirement(capability="pages", reason="Architecture contains generated WordPress pages", priority="required"),
         CapabilityRequirement(capability="site_identity", reason="Generated site needs title/tagline identity", priority="required"),
@@ -199,6 +213,10 @@ def _normalize_architecture(brief: ProjectBrief, architecture: ArchitectureBundl
         baseline_capabilities.append(CapabilityRequirement(
             capability="page_builder_elementor", reason="Selected renderer is Elementor", priority="required"
         ))
+    if any("booking" in p.section_goals for p in pages):
+        baseline_capabilities.append(CapabilityRequirement(
+            capability="forms", reason="Architecture contains a booking/contact form section", priority="required"
+        ))
 
     for item in [*baseline_capabilities, *architecture.capabilities]:
         key = canonicalize_capability(item.capability)
@@ -207,7 +225,6 @@ def _normalize_architecture(brief: ProjectBrief, architecture: ArchitectureBundl
             capabilities.append(item.model_copy(update={"capability": key}))
 
     return architecture.model_copy(update={"pages": pages, "content_matrix": matrix, "capabilities": capabilities})
-
 
 def architecture_to_application_spec(
     brief: ProjectBrief,
@@ -241,34 +258,119 @@ def architecture_to_application_spec(
     )
 
 
-def _default_section(page: PageIntent, section_type: str, matrix: ContentMatrixRow | None, site_title: str) -> SectionContentSpec:
-    cta = matrix.primary_cta if matrix else page.primary_cta
-    cta_url = page.primary_cta_url or "/contact/"
-    if section_type == "hero":
-        return SectionContentSpec(
-            section_type="hero", component_key="hero_split_v1", section_goal=page.purpose,
-            eyebrow=site_title, heading=page.name, body=page.purpose,
-            cta_label=cta or "Зв’язатися", cta_url=cta_url, style_variant="dark",
-        )
-    if section_type in {"services", "benefits", "trust", "team", "process", "stats"}:
-        return SectionContentSpec(
-            section_type=section_type, component_key=f"{section_type}_cards_v1", section_goal=page.purpose,
-            eyebrow=page.name, heading=page.purpose, body="",
-            items=(matrix.key_messages if matrix else [page.purpose]), style_variant="soft",
-        )
-    if section_type == "booking":
-        return SectionContentSpec(
-            section_type="booking", component_key="booking_form_v1", section_goal="Конверсія у звернення",
-            eyebrow="Запис", heading=cta or "Залиште заявку", body="Заповніть форму, щоб команда могла зв’язатися з вами.",
-            style_variant="soft",
-        )
-    if section_type == "cta":
-        return SectionContentSpec(
-            section_type="cta", component_key="cta_band_v1", section_goal="Наступний крок",
-            heading=cta or "Готові зробити наступний крок?", body=page.purpose,
-            cta_label=cta or "Зв’язатися", cta_url=cta_url, style_variant="accent",
-        )
-    return SectionContentSpec(section_type=section_type, component_key=f"{section_type}_v1", heading=page.name, body=page.purpose)
+def _visitor_defaults(
+    brief: ProjectBrief,
+    page: PageIntent,
+    section_type: str,
+    matrix: ContentMatrixRow | None,
+    site_title: str,
+) -> dict[str, Any]:
+    dental = brief.site_type == "dental_clinic" or "стомат" in site_title.lower()
+    cta = (matrix.primary_cta if matrix else page.primary_cta) or "Зв’язатися"
+    cta_url = page.primary_cta_url or ("/contact/" if page.slug != "contact" else "#contact-form")
+    # Domain pack: it provides safe, non-factual fallback language only when the
+    # creative agent returns sparse/planning-style copy. It never invents people,
+    # prices, years, addresses, reviews or clinical claims.
+    if dental:
+        by_slug: dict[str, dict[str, tuple[str, str, list[str]]]] = {
+            "home": {
+                "hero": ("Стоматологія, де зрозуміло кожен наступний крок", "Профілактика, лікування та консультації у зрозумілому форматі. Почніть із вашого запиту — команда допоможе визначити доречний наступний крок.", ["Зрозумілий маршрут — від першого звернення до плану дій", "Турбота про комфорт — спокійна комунікація без зайвого тиску", "Зручний контакт — короткий шлях до консультації"]),
+                "services": ("Основні напрямки стоматологічної допомоги", "Оберіть напрямок, який найбільше відповідає вашій ситуації. Остаточний план визначається після індивідуальної консультації.", ["Профілактика та гігієна — регулярний догляд і підтримка здоров’я ротової порожнини", "Лікування зубів — поетапний підхід до поширених стоматологічних проблем", "Відновлення та естетика — рішення для функції та природного вигляду усмішки"]),
+                "benefits": ("Турбота без зайвої невизначеності", "Хороший досвід починається з чіткої комунікації та зрозумілих наступних кроків.", ["Спочатку — ваш запит — з’ясовуємо, що саме турбує і який результат важливий", "Потім — зрозумілий план — пояснюємо можливі наступні кроки простою мовою", "Далі — зручний зв’язок — залишайте заявку, коли готові перейти до консультації"]),
+                "trust": ("Прозорий підхід до взаємодії", "Без вигаданих обіцянок і гучних цифр: сайт фокусується на зрозумілому сервісі та підтверджених даних.", ["Чітка комунікація — запитання можна уточнити до візиту", "Послідовність — кожен етап має зрозумілий наступний крок", "Редагованість — фактичні дані клініки легко додати у WordPress"]),
+                "team": ("Люди, які пояснюють і допомагають", "Знайомство з фахівцями має починатися з підтверджених імен, ролей та досвіду. Поки цих даних немає, сторінка не вигадує профілі — їх можна додати після уточнення інформації клініки.", ["Профілі без вигаданих фактів", "Зрозуміле пояснення ролі спеціаліста", "Можливість швидко перейти до консультації"]),
+                "cta": ("Готові обговорити ваш запит?", "Залиште звернення — команда клініки зможе уточнити деталі та запропонувати наступний крок.", []),
+            },
+            "services": {
+                "hero": ("Стоматологічні послуги для щоденного здоров’я усмішки", "Від профілактики до відновлення: перегляньте основні напрямки й оберіть, з чого почати консультацію.", ["Профілактика", "Лікування", "Відновлення"]),
+                "services": ("З чим можна звернутися", "Нижче — базові напрямки, які допомагають зорієнтуватися перед консультацією.", ["Профілактика та професійна гігієна — підтримка здоров’я зубів і ясен та профілактичний контроль", "Терапевтичне лікування — робота з карієсом, чутливістю та іншими поширеними скаргами", "Відновлення зубів — рішення, спрямовані на функцію, комфорт і природний вигляд"]),
+                "process": ("Як починається робота", "Не потрібно самостійно визначати потрібну процедуру — достатньо описати свій запит.", ["1. Звернення — коротко опишіть, що вас турбує", "2. Консультація — уточнюються потреби та можливі варіанти", "3. Наступний крок — формується зрозумілий план подальших дій"]),
+                "faq": ("Поширені запитання перед зверненням", "Короткі відповіді допоможуть підготуватися до першого контакту.", ["Не знаю, яка послуга потрібна — опишіть симптом або бажаний результат, а напрямок можна уточнити під час консультації", "Чи можна спочатку поставити запитання? — так, використайте контактну форму на сайті", "Де подивитися точні ціни? — вартість варто додати лише після підтвердження клінікою"]),
+                "cta": ("Потрібна допомога з вибором послуги?", "Залиште звернення, щоб уточнити ваш запит і домовитися про консультацію.", []),
+            },
+            "contact": {
+                "hero": ("Зв’яжіться з клінікою зручним способом", "Поставте запитання або залиште заявку на консультацію. Контактні дані можна доповнити підтвердженою адресою, телефоном і графіком роботи.", ["Запитання перед візитом", "Заявка на консультацію", "Уточнення наступного кроку"]),
+                "contact": ("Є запитання перед візитом?", "Напишіть, що саме вас цікавить. Якщо у вихідному запиті не було адреси чи телефону, ми не вигадуємо їх — підтверджені дані можна додати у WordPress.", ["Телефон — додайте підтверджений номер клініки", "Email — додайте робочу адресу для звернень", "Адреса і графік — заповніть фактичними даними клініки"]),
+                "booking": ("Залиште заявку на консультацію", "Коротко опишіть ваш запит і залиште контакт для відповіді. Не надсилайте через форму зайві медичні або інші чутливі дані.", []),
+                "cta": ("Готові зробити перший крок?", "Залиште звернення — команда клініки зв’яжеться з вами після отримання заявки.", []),
+            },
+        }
+        page_pack = by_slug.get(page.slug, {})
+        if section_type in page_pack:
+            h, b, items = page_pack[section_type]
+            return {"heading": h, "body": b, "items": items, "cta_label": cta, "cta_url": cta_url}
+
+    generic_headings = {
+        "hero": page.name,
+        "services": "Що ми пропонуємо",
+        "benefits": "Чому цей підхід зручний",
+        "trust": "Що допомагає прийняти рішення",
+        "team": "Команда і підхід",
+        "process": "Як усе відбувається",
+        "stats": "Коротко про головне",
+        "faq": "Поширені запитання",
+        "contact": "Як зв’язатися",
+        "booking": "Залиште заявку",
+        "cta": "Готові перейти до наступного кроку?",
+        "content": "Детальніше",
+    }
+    messages = [m for m in (matrix.key_messages if matrix else []) if not _looks_internal_copy(str(m))]
+    generic_bodies = {
+        "hero": f"Дізнайтеся головне про {site_title} і оберіть зручний наступний крок.",
+        "services": "Перегляньте основні напрямки та знайдіть варіант, який відповідає вашому запиту.",
+        "benefits": "Ключові переваги подані просто й конкретно, щоб рішення було легше прийняти.",
+        "trust": "Фокус на прозорій комунікації, підтверджених даних і зрозумілих наступних кроках.",
+        "team": "Додайте підтверджені профілі фахівців, щоб відвідувачі могли познайомитися з командою без вигаданих фактів.",
+        "process": "Короткий послідовний маршрут допомагає зрозуміти, що відбувається після першого звернення.",
+        "stats": "Тут варто використовувати лише перевірені цифри та факти, які надав власник сайту.",
+        "faq": "Відповіді на типові запитання допомагають відвідувачеві швидше зорієнтуватися перед зверненням.",
+        "contact": "Оберіть зручний спосіб зв’язку або залиште коротке звернення через форму.",
+        "booking": "Залиште контакт і коротко опишіть запит — команда зможе повернутися з відповіддю.",
+        "cta": "Зробіть наступний крок у зручний для вас спосіб.",
+        "content": "Коротка практична інформація, що допомагає відвідувачеві перейти до наступної дії.",
+    }
+    return {
+        "heading": generic_headings.get(section_type, page.name),
+        "body": messages[0] if messages else generic_bodies.get(section_type, generic_bodies["content"]),
+        "items": messages[:4],
+        "cta_label": cta,
+        "cta_url": cta_url,
+    }
+
+
+def _looks_internal_copy(text: str) -> bool:
+    value = (text or "").strip().lower()
+    if not value:
+        return True
+    markers = [
+        "ця сторінка", "сторінка має", "додайте", "після генерації", "контент секції",
+        "мета сторінки", "надати канал", "допомогти зрозуміти", "розкрити принципи",
+        "сформувати довіру", "зменшити friction", "користувач повинен", "пояснити роль сторінки",
+    ]
+    return any(m in value for m in markers)
+
+
+def _default_section(brief: ProjectBrief, page: PageIntent, section_type: str, matrix: ContentMatrixRow | None, site_title: str) -> SectionContentSpec:
+    defaults = _visitor_defaults(brief, page, section_type, matrix, site_title)
+    variant = "dark" if section_type in {"hero", "cta"} else ("soft" if section_type in {"services", "benefits", "trust", "booking", "contact", "faq"} else "default")
+    component = {
+        "hero": "hero_split_v2", "services": "services_grid_v2", "benefits": "benefits_grid_v2",
+        "trust": "trust_grid_v2", "team": "team_grid_v2", "process": "process_steps_v2",
+        "faq": "faq_cards_v2", "booking": "booking_form_v2", "contact": "contact_split_v2",
+        "cta": "cta_band_v2",
+    }.get(section_type, f"{section_type}_v2")
+    return SectionContentSpec(
+        section_type=section_type,
+        component_key=component,
+        section_goal=page.purpose,
+        eyebrow=site_title if section_type == "hero" else (page.name if section_type not in {"cta", "booking"} else ""),
+        heading=str(defaults["heading"]),
+        body=str(defaults["body"]),
+        items=list(defaults.get("items", [])),
+        cta_label=str(defaults.get("cta_label") or "") or None if section_type in {"hero", "cta", "contact"} else None,
+        cta_url=str(defaults.get("cta_url") or "") or None if section_type in {"hero", "cta", "contact"} else None,
+        style_variant=variant,
+    )
 
 
 def reconcile_experience(
@@ -280,45 +382,109 @@ def reconcile_experience(
     exp_by_slug = {p.page_slug: p for p in experience.pages if p.page_slug}
     exp_by_name = {p.page_name: p for p in experience.pages}
     output: list[PageExperienceSpec] = []
+    global_h1s: set[str] = set()
+
     for page in architecture.pages:
         existing = exp_by_slug.get(page.slug) or exp_by_name.get(page.name)
         matrix = matrix_by_slug.get(page.slug)
-        if existing is None:
-            section_types = page.section_goals or ["hero", "content", "cta"]
-            specs = [_default_section(page, s, matrix, architecture.site_title) for s in section_types]
-            existing = PageExperienceSpec(
-                page_name=page.name,
-                page_slug=page.slug,
-                page_goal=page.purpose,
-                sections=section_types,
-                section_specs=specs,
-                content_guidance=["Do not fabricate missing facts", *(matrix.key_messages if matrix else [])],
-                responsive_notes=["Mobile-first stacking", "No horizontal overflow"],
-                accessibility_notes=["Exactly one H1", "Readable contrast", "Descriptive links"],
-                seo=SeoSpec(
-                    slug="/" if page.slug == "home" else f"/{page.slug}/",
-                    title=f"{page.name} | {architecture.site_title}",
-                    meta_description=page.purpose[:155],
-                    h1=page.name,
-                    internal_link_targets=["/" if x == "home" else f"/{x}/" for x in (matrix.internal_links if matrix else [])],
-                    schema_types=["WebPage"],
-                ),
-            )
-        else:
-            # Keep design copy but force architectural identity and links.
-            seo = existing.seo.model_copy(update={
-                "slug": "/" if page.slug == "home" else f"/{page.slug}/",
-                "internal_link_targets": ["/" if x == "home" else f"/{x}/" for x in (matrix.internal_links if matrix else [])],
-            })
-            existing = existing.model_copy(update={
-                "page_name": page.name,
-                "page_slug": page.slug,
-                "page_goal": page.purpose,
-                "seo": seo,
-            })
-        output.append(existing)
-    return experience.model_copy(update={"pages": output})
+        required_types = list(dict.fromkeys(page.section_goals or ["hero", "content", "cta"]))
+        incoming_by_type: dict[str, list[SectionContentSpec]] = {}
+        if existing is not None:
+            for sec in existing.section_specs:
+                incoming_by_type.setdefault(sec.section_type.strip().lower() or "content", []).append(sec)
 
+        specs: list[SectionContentSpec] = []
+        used_headings: set[str] = set()
+        for index, section_type in enumerate(required_types):
+            fallback = _default_section(brief, page, section_type, matrix, architecture.site_title)
+            candidates = incoming_by_type.get(section_type, [])
+            sec = candidates.pop(0) if candidates else fallback
+
+            heading = (sec.heading or "").strip()
+            body = (sec.body or "").strip()
+            if not heading or (index > 0 and heading.casefold() == page.name.casefold()) or heading.casefold() in used_headings or _looks_internal_copy(heading):
+                heading = fallback.heading
+            if not body or len(body) < 45 or _looks_internal_copy(body):
+                body = fallback.body
+
+            items = [x.strip() for x in sec.items if str(x).strip()]
+            if section_type in {"services", "benefits", "trust", "team", "process", "stats", "faq"} and len(items) < 3:
+                items = list(dict.fromkeys([*items, *fallback.items]))[:6]
+            if section_type in {"hero", "contact"} and not items and fallback.items:
+                items = fallback.items[:3]
+
+            cta_label = sec.cta_label
+            cta_url = sec.cta_url
+            if section_type in {"hero", "cta"} and not cta_label:
+                cta_label = fallback.cta_label
+                cta_url = fallback.cta_url
+            if cta_label and not cta_url:
+                cta_url = fallback.cta_url
+
+            component_key = sec.component_key or fallback.component_key
+            style_variant = sec.style_variant or fallback.style_variant
+            sec = sec.model_copy(update={
+                "section_type": section_type,
+                "component_key": component_key,
+                "section_goal": sec.section_goal or fallback.section_goal,
+                "eyebrow": sec.eyebrow or fallback.eyebrow,
+                "heading": heading,
+                "body": body,
+                "items": items,
+                "cta_label": cta_label,
+                "cta_url": cta_url,
+                "style_variant": style_variant,
+            })
+            used_headings.add(heading.casefold())
+            specs.append(sec)
+
+        fallback_seo = SeoSpec(
+            slug="/" if page.slug == "home" else f"/{page.slug}/",
+            title=f"{page.name} | {architecture.site_title}",
+            meta_description=(_visitor_defaults(brief, page, "hero", matrix, architecture.site_title)["body"] or page.purpose)[:155],
+            h1=specs[0].heading if specs else page.name,
+            internal_link_targets=["/" if x == "home" else f"/{x}/" for x in (matrix.internal_links if matrix else [])],
+            schema_types=["WebPage"],
+        )
+        if existing is None:
+            seo = fallback_seo
+            content_guidance = ["Visitor-facing copy only", "Do not fabricate missing facts", *(matrix.key_messages if matrix else [])]
+            responsive_notes = ["Mobile-first stacking", "No horizontal overflow"]
+            accessibility_notes = ["Exactly one H1", "Readable contrast", "Descriptive links"]
+        else:
+            seo = existing.seo.model_copy(update={
+                "slug": fallback_seo.slug,
+                "h1": existing.seo.h1 if existing.seo.h1 and not _looks_internal_copy(existing.seo.h1) else fallback_seo.h1,
+                "title": existing.seo.title or fallback_seo.title,
+                "meta_description": existing.seo.meta_description if len(existing.seo.meta_description.strip()) >= 60 and not _looks_internal_copy(existing.seo.meta_description) else fallback_seo.meta_description,
+                "internal_link_targets": fallback_seo.internal_link_targets,
+            })
+            content_guidance = existing.content_guidance
+            responsive_notes = existing.responsive_notes
+            accessibility_notes = existing.accessibility_notes
+
+        # One unique H1 per generated page. The hero heading is the rendered H1.
+        h1 = specs[0].heading if specs else seo.h1
+        if h1.casefold() in global_h1s:
+            h1 = f"{page.name}: {architecture.site_title}"
+            if specs:
+                specs[0] = specs[0].model_copy(update={"heading": h1})
+        global_h1s.add(h1.casefold())
+        seo = seo.model_copy(update={"h1": h1})
+
+        output.append(PageExperienceSpec(
+            page_name=page.name,
+            page_slug=page.slug,
+            page_goal=page.purpose,
+            sections=required_types,
+            section_specs=specs,
+            content_guidance=content_guidance,
+            responsive_notes=responsive_notes,
+            accessibility_notes=accessibility_notes,
+            seo=seo,
+        ))
+
+    return experience.model_copy(update={"pages": output})
 
 def compile_build_plan(
     app_spec: ApplicationSpec,
@@ -398,6 +564,22 @@ def compile_build_plan(
         ))
 
     actions.extend([
+        BuildAction(
+            ability="thesis-ai-bridge/apply-site-design",
+            parameters={
+                "primary": experience_spec.design_system.primary,
+                "accent": experience_spec.design_system.accent,
+                "background": experience_spec.design_system.background,
+                "surface": experience_spec.design_system.surface,
+                "text": experience_spec.design_system.text,
+                "muted": experience_spec.design_system.muted,
+                "heading_font": experience_spec.design_system.heading_font,
+                "body_font": experience_spec.design_system.body_font,
+                "container_width": experience_spec.design_system.container_width,
+                "radius": experience_spec.design_system.radius,
+            },
+            rationale="Apply the shared DesignSystem consistently to the WordPress front end",
+        ),
         BuildAction(
             ability="thesis-ai-bridge/update-site-identity",
             parameters={"site_title": app_spec.site_title, "tagline": app_spec.tagline},
@@ -522,7 +704,7 @@ class MockAgentRuntime(AgentRuntime):
             row = matrix.get(page.slug)
             sections: list[SectionContentSpec] = []
             for section_type in page.section_goals:
-                sec = _default_section(page, section_type, row, architecture.site_title)
+                sec = _default_section(brief, page, section_type, row, architecture.site_title)
                 if section_type == "services":
                     sec = sec.model_copy(update={"heading": "Допомога відповідно до ваших потреб", "body": "Почніть із напрямку, який найбільше відповідає вашому запиту.", "items": ["Профілактика — регулярна турбота та раннє виявлення проблем", "Лікування — зрозумілий план і поетапний підхід", "Естетика — рішення з фокусом на природний результат"]})
                 elif section_type == "benefits":

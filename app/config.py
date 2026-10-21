@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     max_llm_calls: int = 10
     max_repair_loops: int = 1
     enable_llm_repair_escalation: bool = True
+    # Standard business sites use the deterministic Implementation Agent compiler.
+    # Enable this only when testing advisory Builder LLM behavior.
+    enable_builder_llm_review: bool = False
 
     # Legacy push settings retained only for old CLI/tests. v0.6+ WordPress Pull
     # execution means the cloud backend does not call WordPress to mutate it.
