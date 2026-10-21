@@ -50,6 +50,9 @@ class SiteSnapshot(BaseModel):
     themes: list[dict[str, Any]] = Field(default_factory=list)
     capabilities: dict[str, Any] = Field(default_factory=dict)
     structure: dict[str, Any] = Field(default_factory=dict)
+    bridge_contract: dict[str, Any] = Field(default_factory=dict)
+    media: list[dict[str, Any]] = Field(default_factory=list)
+    commerce: dict[str, Any] = Field(default_factory=dict)
 
     def plugin_state(self, slug: str) -> dict[str, Any] | None:
         for plugin in self.plugins:

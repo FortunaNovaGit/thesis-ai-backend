@@ -80,6 +80,18 @@ CONTENT QUALITY RULES:
   search intent. Meta descriptions must be useful visitor copy, not page-purpose
   text copied from the architecture.
 
+VISUAL COMPOSITION RULES:
+- Treat the first screen as an editorial experience, not a box full of bullet points.
+- On a shop page use product-specific language, distinct collection headings, and
+  a helpful CTA. Do not imitate product listings as plain text if the user wants
+  real products: product catalogs require WooCommerce product objects.
+- Never duplicate "Магазин" or another page H1 as multiple H2s.
+- If product photography is missing, do not fabricate images or claim a visual
+  asset was supplied; the compiler can use matching WordPress Media Library assets
+  or a deliberately abstract editorial hero.
+- Use meaningful sections with actual customer benefits and varied lengths; avoid
+  repeating the same sentence/idea across the hero, cards, and CTA.
+
 Choose semantic section types/components only from:
 hero, services, benefits, trust, team, process, stats, faq, content, booking,
 contact, cta, products.

@@ -56,6 +56,25 @@ class PullPlanningWorkflow:
                 blocked.append(item)
         return {"allowed": allowed, "pending": pending, "blocked": blocked}
 
+    @staticmethod
+    def _validate_bridge_contract(snapshot: SiteSnapshot, renderer: Renderer) -> None:
+        """Check the WordPress executor before spending any model tokens.
+
+        Fixture snapshots without a version remain allowed for offline unit tests;
+        connected sites must use a Bridge with a discoverable ABI manifest.
+        """
+        if not snapshot.site_info.get("bridge_version") and not snapshot.bridge_contract:
+            return
+        contract = snapshot.bridge_contract
+        if not contract or not isinstance(contract.get("abilities"), list):
+            raise RuntimeError("Bridge compatibility preflight failed: upgrade WordPress Bridge to v0.8.0 before launching a paid build.")
+        offered = set(str(x) for x in contract["abilities"])
+        required = {"get-site-snapshot", "set-page-seo", "apply-site-design", "ensure-navigation-menu", "set-homepage-by-slug", "update-site-identity"}
+        required.add("elementor-ensure-draft-page" if renderer in {"elementor", "auto"} else "ensure-draft-page")
+        missing = sorted(required - offered)
+        if missing:
+            raise RuntimeError("Bridge compatibility preflight failed. Missing abilities: " + ", ".join(missing))
+
     async def plan(self, user_request: str, renderer: Renderer, site_snapshot: SiteSnapshot, progress=None) -> dict[str, Any]:
         async def report(stage: str, pct: int, detail: str) -> None:
             if progress is not None:
@@ -63,6 +82,7 @@ class PullPlanningWorkflow:
                 if hasattr(value, "__await__"):
                     await value
 
+        self._validate_bridge_contract(site_snapshot, renderer)
         await report("orchestrator", 8, "Orchestrator is normalizing the request into a compact ProjectBrief")
         brief: ProjectBrief = await self.agents.orchestrate(user_request, renderer)
         # The renderer selected by the user is authoritative.
@@ -81,6 +101,20 @@ class PullPlanningWorkflow:
         }
         if unavailable_required:
             raise RuntimeError("No approved implementation exists for required capabilities: " + ", ".join(sorted(unavailable_required)))
+
+        # A missing, required plugin is a deployment dependency, not a creative
+        # problem. Detect it before paying for design/content generation.
+        required_capabilities = {r.capability for r in architecture.capabilities if r.priority == "required"}
+        if renderer in {"elementor", "auto"}:
+            required_capabilities.add("page_builder_elementor")
+        install_needed = [r.plugin_slug for r in capability_resolutions if r.action == "install" and r.plugin_slug and r.capability in required_capabilities]
+        if install_needed and site_snapshot.bridge_contract:
+            contract = site_snapshot.bridge_contract
+            if not contract.get("plugin_management_enabled", False):
+                raise RuntimeError("Required plugins need installation, but WordPress plugin management is disabled: " + ", ".join(install_needed))
+            method = str(contract.get("filesystem_method", "unknown"))
+            if method != "direct":
+                raise RuntimeError("WordPress filesystem method '" + method + "' prevents unattended plugin installation. Install these approved plugins manually, then retry: " + ", ".join(install_needed))
 
         await report("design", 46, "Design/Content/SEO agent is creating one coherent site-wide experience")
         experience: ExperienceSpec = await self.agents.design(brief, architecture)
@@ -103,6 +137,11 @@ class PullPlanningWorkflow:
             # another LLM call on a manifest that is already complete.
             advisory = BuildPlan(actions=[])
         build_plan = merge_advisory_actions(baseline, advisory)
+        if site_snapshot.bridge_contract:
+            offered = set(str(x) for x in site_snapshot.bridge_contract.get("abilities", []))
+            missing_abilities = sorted({action.ability.removeprefix("thesis-ai-bridge/") for action in build_plan.actions} - offered)
+            if missing_abilities:
+                raise RuntimeError("This WordPress Bridge cannot execute the planned actions: " + ", ".join(missing_abilities))
         gated = self._gate_actions(build_plan.actions)
 
         await report("ready", 100, "Artifact-driven plan is ready for local WordPress execution")
@@ -127,7 +166,7 @@ class PullPlanningWorkflow:
             "model_router": self.settings.model_router if self.settings.resolved_agent_mode == "openai" else {"all": "mock"},
             "usage": self.agents.usage.model_dump(mode="json"),
             "budget": self.agents.budget_state(),
-            "architecture_version": "artifact_pipeline_v2",
+            "architecture_version": "artifact_pipeline_v3_visual",
         }
 
     @staticmethod
@@ -191,6 +230,13 @@ class PullPlanningWorkflow:
 
         required_plugins = {item.plugin_slug for item in app_spec.plugin_plan}
         active_plugins = {str(p.get("slug", "")) for p in snapshot.plugins if p.get("active")}
+        if snapshot.bridge_contract and "ecommerce" in {c.capability for c in architecture.capabilities} and snapshot.commerce.get("published_products", 0) == 0:
+            issues.append(QualityIssue(
+                id="DET-empty-catalog", category="functional", severity="medium",
+                description="WooCommerce catalog has no published products. Product descriptions on an Elementor page are not actual WooCommerce products.",
+                responsible_agent=AgentRole.BUILDER,
+                suggested_fix="Create and verify WooCommerce product drafts with real product data; do not invent prices or stock.",
+            ))
         missing_plugins = sorted(required_plugins - active_plugins)
         if missing_plugins:
             issues.append(QualityIssue(

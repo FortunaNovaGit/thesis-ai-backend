@@ -546,7 +546,7 @@ def compile_build_plan(
                 parameters={
                     "title": page.name,
                     "slug": page.slug,
-                    "elements": compile_elementor_page(exp, experience_spec.design_system),
+                    "elements": compile_elementor_page(exp, experience_spec.design_system, snapshot.media, live_catalog=bool(snapshot.commerce.get("published_products", 0))),
                     "settings": {"hide_title": "yes", "page_layout": "elementor_full_width"},
                 },
                 rationale=f"Render {page.name} from the shared component library",

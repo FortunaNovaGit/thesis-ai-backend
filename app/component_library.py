@@ -7,6 +7,38 @@ from typing import Any
 from .models import DesignSystem, PageExperienceSpec, SectionContentSpec
 
 
+def _validated_media_url(asset: dict[str, Any]) -> str:
+    url = str(asset.get("url", ""))
+    return url if url.startswith("https://") and asset.get("id") else ""
+
+
+def choose_page_media(page: PageExperienceSpec, media: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Use only image attachments explicitly returned by the connected WordPress site."""
+    if not media:
+        return None
+    target = " ".join([page.page_name, page.page_goal, page.page_slug]).casefold()
+    scored: list[tuple[int, dict[str, Any]]] = []
+    for item in media:
+        url = _validated_media_url(item)
+        if not url:
+            continue
+        description = " ".join(str(item.get(k, "")) for k in ("alt", "title", "caption")).casefold()
+        score = sum(1 for word in target.split() if len(word) > 3 and word in description)
+        scored.append((score, item))
+    if not scored:
+        return None
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    # Do not put an unrelated product photograph on a page merely because one exists.
+    return scored[0][1] if scored[0][0] > 0 else None
+
+
+def _image_widget(media: dict[str, Any]) -> dict[str, Any]:
+    return _widget("image", {
+        "image": {"id": int(media["id"]), "url": _validated_media_url(media)},
+        "image_size": "large",
+    })
+
+
 def _eid() -> str:
     return secrets.token_hex(4)
 
@@ -148,7 +180,7 @@ def _intro(section: SectionContentSpec, ds: DesignSystem, *, h1: bool = False) -
     return out
 
 
-def hero(section: SectionContentSpec, ds: DesignSystem) -> dict[str, Any]:
+def hero(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] | None = None) -> dict[str, Any]:
     left_elements = _intro(section, ds, h1=True)
     if section.cta_label:
         left_elements.append(_button(section.cta_label, section.cta_url or "#", ds, accent=section.style_variant == "dark"))
@@ -161,26 +193,33 @@ def hero(section: SectionContentSpec, ds: DesignSystem) -> dict[str, Any]:
     })
 
     item_pairs = _split_items(section.items)
-    if item_pairs:
-        right_bits: list[dict[str, Any]] = [_heading("Коротко про головне", ds.text, ds, level="h3", size=22)]
-        for title, body in item_pairs[:3]:
-            right_bits.append(_heading(title, ds.primary, ds, level="h4", size=18))
-            if body:
-                right_bits.append(_text(body, ds.muted, ds, size=15))
-        right = _container(right_bits, {
-            "content_width": "full", "width": _pct(38), "width_mobile": _pct(100),
+    if media:
+        # The image comes from this site's Media Library; never fabricate a stock photo.
+        right = _container([_image_widget(media)], {
+            "content_width": "full", "width": _pct(40), "width_mobile": _pct(100),
             "background_background": "classic", "background_color": ds.surface,
-            "padding": _box(30, 30, 30, 30), "border_radius": _box(ds.radius, ds.radius, ds.radius, ds.radius),
-            "gap": _px(10),
+            "padding": _box(12, 12, 12, 12),
+            "border_radius": _box(ds.radius, ds.radius, ds.radius, ds.radius),
         })
     else:
-        right = _container([
-            _heading("Наступний крок", ds.text, ds, level="h3", size=22),
-            _text(section.section_goal or "Оберіть потрібний розділ або скористайтеся основною дією сторінки.", ds.muted, ds, size=16),
-        ], {
-            "content_width": "full", "width": _pct(38), "width_mobile": _pct(100),
-            "background_background": "classic", "background_color": ds.surface,
-            "padding": _box(30, 30, 30, 30), "border_radius": _box(ds.radius, ds.radius, ds.radius, ds.radius),
+        # Abstract editorial hero: no unrelated stock photos or repetitive filler cards.
+        right_bits: list[dict[str, Any]] = []
+        if item_pairs:
+            for title, body in item_pairs[:2]:
+                right_bits.append(_heading(title, "#FFFFFF", ds, level="h3", size=26))
+                if body:
+                    right_bits.append(_text(body, "#FFFFFF", ds, size=16))
+        else:
+            right_bits = [
+                _heading(section.eyebrow or section.heading, "#FFFFFF", ds, level="h3", size=28),
+                _text(section.body[:145] if section.body else "", "#FFFFFF", ds, size=16),
+            ]
+        right = _container(right_bits, {
+            "content_width": "full", "width": _pct(40), "width_mobile": _pct(100),
+            "background_background": "classic", "background_color": ds.primary,
+            "padding": _box(44, 34, 44, 34), "min_height": _px(300),
+            "border_radius": _box(ds.radius, ds.radius, ds.radius, ds.radius),
+            "justify_content": "center", "gap": _px(16),
         })
 
     row = _container([left, right], {
@@ -194,11 +233,17 @@ def hero(section: SectionContentSpec, ds: DesignSystem) -> dict[str, Any]:
     return _section_shell(section, [row], ds)
 
 
-def cards(section: SectionContentSpec, ds: DesignSystem) -> dict[str, Any]:
+def cards(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] | None = None, *, live_catalog: bool = False) -> dict[str, Any]:
     body = _intro(section, ds)
     pairs = _split_items(section.items)
     item_cards = [_surface_card(title, text, ds, width=31 if len(pairs) >= 3 else 48) for title, text in pairs]
-    if item_cards:
+    if section.section_type == "products" and live_catalog:
+        # Render actual WooCommerce products when present. The shortcode does not
+        # create fictitious demo catalog entries.
+        body.append(_container([_widget("shortcode", {"shortcode": '[products limit="6" columns="3" orderby="date" order="DESC"]'})], {
+            "content_width": "boxed", "padding": _box(12, 0, 18, 0),
+        }))
+    elif item_cards:
         body.append(_container(item_cards, {
             "content_width": "full",
             "flex_direction": "row",
@@ -308,17 +353,38 @@ COMPONENTS = {
 }
 
 
-def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem) -> list[dict[str, Any]]:
+def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem, media: list[dict[str, Any]] | None = None, *, live_catalog: bool = False) -> list[dict[str, Any]]:
     elements: list[dict[str, Any]] = []
     specs = page.section_specs
     if not specs:
         specs = [SectionContentSpec(section_type="content", heading=page.page_name, body=page.page_goal)]
+    selected_image = choose_page_media(page, media or [])
+    seen_headings: set[str] = set()
+    better_headings = {
+        "products": "Обирайте з колекції", "services": "Що ми пропонуємо",
+        "benefits": "Чому обирають нас", "trust": "Наш підхід",
+        "contact": "Зв’яжіться з нами", "cta": "Зробіть наступний крок",
+        "faq": "Поширені запитання", "process": "Як усе працює",
+    }
     for index, section in enumerate(specs):
+        # Never render a second identical section heading on one page.
+        key = section.heading.strip().casefold()
+        if index > 0 and (key in seen_headings or key == page.page_name.casefold()):
+            alternative = better_headings.get(section.section_type, "Дізнайтеся більше")
+            if alternative.casefold() in seen_headings:
+                alternative = f"{alternative} — {index + 1}"
+            section = section.model_copy(update={"heading": alternative})
+        seen_headings.add(section.heading.strip().casefold())
         section_type = section.section_type.lower().strip() or "content"
         if index == 0 and section_type not in {"hero", "products"}:
             section_type = "hero"
         renderer = COMPONENTS.get(section_type, simple_content)
-        elements.append(renderer(section, ds))
+        if section_type == "hero":
+            elements.append(hero(section, ds, selected_image))
+        elif section_type in {"products", "services", "benefits", "trust", "team", "process", "stats"}:
+            elements.append(cards(section, ds, selected_image, live_catalog=live_catalog))
+        else:
+            elements.append(renderer(section, ds))
     return elements
 
 
