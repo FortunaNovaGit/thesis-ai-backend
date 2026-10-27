@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
 import ipaddress
 import socket
 import uuid
@@ -18,9 +19,11 @@ from .config import settings
 from .connection_token import ConnectionTokenCodec
 from .models import SiteSnapshot
 from .pull_workflow import PullPlanningWorkflow
+from .repository import JobRepository
 
 
-app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.8.0")
+app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.8.1")
+repository = JobRepository(settings.database_url)
 codec = ConnectionTokenCodec(settings.backend_token_secret, Path(settings.backend_key_file))
 
 # Planning jobs live only while the Render process is alive. The actual WordPress
@@ -36,7 +39,23 @@ def _utcnow() -> str:
 
 
 def _public_job(job: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in job.items() if key not in {"site_id"}}
+    return {key: value for key, value in job.items() if key not in {"site_id", "_payload"}}
+
+
+def _save_job(job: dict[str, Any]) -> None:
+    repository.put(job)
+
+
+def _get_job(job_id: str, site_id: str) -> dict[str, Any] | None:
+    cached = _plan_jobs.get(job_id)
+    if cached and cached.get("site_id") == site_id:
+        return cached
+    return repository.get(job_id, site_id)
+
+
+def _body_size(value: BaseModel, max_bytes: int) -> None:
+    if len(value.model_dump_json().encode("utf-8")) > max_bytes:
+        raise HTTPException(status_code=413, detail="Payload exceeds configured maximum size")
 
 
 class ConnectRequest(BaseModel):
@@ -99,8 +118,8 @@ def _validate_site_url(site_url: str) -> str:
 def _credentials(site_id: str, authorization: str | None):
     token = _bearer_token(authorization)
     creds = codec.decode(site_id, token)
-    if not creds:
-        raise HTTPException(status_code=401, detail="Invalid or expired site token")
+    if not creds or repository.is_revoked(site_id):
+        raise HTTPException(status_code=401, detail="Invalid, revoked or expired site token")
     return creds
 
 
@@ -108,7 +127,7 @@ def _credentials(site_id: str, authorization: str | None):
 async def health() -> dict[str, Any]:
     return {
         "status": "ok",
-        "version": "0.8.0",
+        "version": "0.8.1",
         "execution_mode": "wordpress_pull",
         "agent_mode": settings.resolved_agent_mode,
         "configured_agent_mode": settings.agent_mode,
@@ -116,8 +135,11 @@ async def health() -> dict[str, Any]:
         "model_router": settings.model_router if settings.resolved_agent_mode == "openai" else {"all": "mock"},
         "budget": {"max_cost_usd": settings.max_build_cost_usd, "max_total_tokens": settings.max_total_llm_tokens, "max_llm_calls": settings.max_llm_calls},
         "stable_connection_tokens": codec.persistent,
+        "pairing_protection_enabled": bool(settings.backend_pairing_secret),
         "agent_output_mode": "artifact_pipeline_json_pydantic",
         "architecture_version": "artifact_pipeline_v3_visual",
+        "job_store": "postgresql" if repository.durable else "sqlite_ephemeral",
+        "durable_jobs": repository.durable,
     }
 
 
@@ -126,7 +148,11 @@ async def health() -> dict[str, Any]:
 # EasyWP 429/Anti-DDoS failure mode.
 @app.post("/v1/sites/connect")
 @app.post("/v2/sites/connect")
-async def connect_site(payload: ConnectRequest):
+async def connect_site(payload: ConnectRequest, x_thesis_pairing_secret: str | None = Header(default=None)):
+    if settings.backend_pairing_secret and not secrets.compare_digest(
+        x_thesis_pairing_secret or "", settings.backend_pairing_secret
+    ):
+        raise HTTPException(status_code=403, detail="Backend pairing secret is required for new connections")
     site_url = _validate_site_url(payload.site_url)
     site_id, site_token = codec.issue(
         site_url=site_url,
@@ -167,12 +193,14 @@ async def check_site(site_id: str, authorization: str | None = Header(default=No
 async def _run_plan_job(job_id: str, site_id: str, payload: PullPlanRequest) -> None:
     job = _plan_jobs[job_id]
     job.update({"status": "running", "stage": "starting", "progress": 1, "updated_at": _utcnow()})
+    _save_job(job)
     agents = None
 
     async def progress(stage: str, pct: int, detail: str) -> None:
         current = _plan_jobs.get(job_id)
         if current:
             current.update({"stage": stage, "progress": pct, "detail": detail, "updated_at": _utcnow()})
+            _save_job(current)
 
     try:
         snapshot = SiteSnapshot.model_validate(payload.site_snapshot)
@@ -213,6 +241,7 @@ async def _run_plan_job(job_id: str, site_id: str, payload: PullPlanRequest) -> 
             failure_payload["budget"] = agents.budget_state()
         job.update(failure_payload)
     finally:
+        _save_job(job)
         if _active_plan_by_site.get(site_id) == job_id:
             _active_plan_by_site.pop(site_id, None)
         _plan_tasks.pop(job_id, None)
@@ -221,13 +250,24 @@ async def _run_plan_job(job_id: str, site_id: str, payload: PullPlanRequest) -> 
 @app.post("/v2/sites/{site_id}/plans", status_code=202)
 async def start_plan(site_id: str, payload: PullPlanRequest, authorization: str | None = Header(default=None)):
     _credentials(site_id, authorization)
+    _body_size(payload, settings.max_snapshot_bytes)
+    # Bounded retention applies only to terminal jobs; active work is untouched.
+    repository.cleanup(settings.job_retention_days)
     existing_id = _active_plan_by_site.get(site_id)
     if existing_id:
-        existing = _plan_jobs.get(existing_id)
+        existing = _get_job(existing_id, site_id)
         if existing and existing.get("status") in {"queued", "running"}:
             response = _public_job(existing)
             response["reused"] = True
             return response
+    # A different backend process (or a restart) may have accepted the plan.
+    existing = repository.active(site_id)
+    if existing and existing.get("job_id") not in _plan_tasks:
+        # Reuse the same durable plan, not an expensive duplicate LLM request.
+        _resume_if_needed(existing, site_id)
+        response = _public_job(existing)
+        response["reused"] = True
+        return response
 
     job_id = str(uuid.uuid4())
     job = {
@@ -241,26 +281,49 @@ async def start_plan(site_id: str, payload: PullPlanRequest, authorization: str 
         "updated_at": _utcnow(),
         "result": None,
         "error": None,
+        "_payload": payload.model_dump(mode="json"),
     }
     _plan_jobs[job_id] = job
+    _save_job(job)
     _active_plan_by_site[site_id] = job_id
     task = asyncio.create_task(_run_plan_job(job_id, site_id, payload))
     _plan_tasks[job_id] = task
     return _public_job(job)
 
 
+def _resume_if_needed(job: dict[str, Any], site_id: str) -> None:
+    """Resume unfinished planning after a single-worker backend restart.
+
+    The existing job id is reused, avoiding a second independent build. For
+    multi-instance deployment a DB-backed distributed lease is still required.
+    """
+    job_id = str(job["job_id"])
+    if job.get("status") not in {"queued", "running"} or job_id in _plan_tasks:
+        return
+    stored_payload = job.get("_payload")
+    if not isinstance(stored_payload, dict):
+        job.update({"status": "failed", "error": "Planning input was not persisted; restart the build", "updated_at": _utcnow()})
+        _save_job(job)
+        return
+    _plan_jobs[job_id] = job
+    _active_plan_by_site[site_id] = job_id
+    _plan_tasks[job_id] = asyncio.create_task(_run_plan_job(job_id, site_id, PullPlanRequest.model_validate(stored_payload)))
+
+
 @app.get("/v2/sites/{site_id}/plans/{job_id}")
 async def get_plan(site_id: str, job_id: str, authorization: str | None = Header(default=None)):
     _credentials(site_id, authorization)
-    job = _plan_jobs.get(job_id)
+    job = _get_job(job_id, site_id)
     if not job or job.get("site_id") != site_id:
         raise HTTPException(status_code=404, detail="Planning job not found. Start the build again; no WordPress changes were lost.")
+    _resume_if_needed(job, site_id)
     return _public_job(job)
 
 
 @app.post("/v2/sites/{site_id}/verify")
 async def verify_site(site_id: str, payload: VerifyRequest, authorization: str | None = Header(default=None)):
     _credentials(site_id, authorization)
+    _body_size(payload, settings.max_verify_bytes)
     try:
         snapshot = SiteSnapshot.model_validate(payload.verification_snapshot)
         prior_usage = payload.bundle.get("usage", {}) if isinstance(payload.bundle, dict) else {}
@@ -274,12 +337,14 @@ async def verify_site(site_id: str, payload: VerifyRequest, authorization: str |
             budget_limits=BudgetLimits(remaining_cost, remaining_tokens, remaining_calls),
         )
         planner = PullPlanningWorkflow(settings, agents)
-        return await planner.verify(
+        result = await planner.verify(
             bundle=payload.bundle,
             executions=payload.executions,
             verification_snapshot=snapshot,
             repair_attempts=payload.repair_attempts,
         )
+        repository.report(str(uuid.uuid4()), site_id, result)
+        return result
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Verification failed: {exc}") from exc
 
@@ -288,6 +353,7 @@ async def verify_site(site_id: str, payload: VerifyRequest, authorization: str |
 @app.post("/v2/sites/{site_id}/disconnect")
 async def disconnect_site(site_id: str, authorization: str | None = Header(default=None)):
     _credentials(site_id, authorization)
+    repository.revoke_site(site_id)
     return {"disconnected": True}
 
 

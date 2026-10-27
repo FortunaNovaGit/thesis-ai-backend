@@ -54,8 +54,8 @@ class ConnectionTokenCodec:
             "v": 1,
             "site_id": site_id,
             "site_url": site_url.rstrip("/"),
-            "username": username,
-            "application_password": application_password,
+            # Pull-mode tokens contain no WordPress administrator credentials.
+            # Legacy tokens can still be decoded until the site reconnects.
             "bridge_version": bridge_version,
             "site_name": site_name,
         }

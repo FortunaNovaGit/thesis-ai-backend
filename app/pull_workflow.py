@@ -74,6 +74,8 @@ class PullPlanningWorkflow:
         missing = sorted(required - offered)
         if missing:
             raise RuntimeError("Bridge compatibility preflight failed. Missing abilities: " + ", ".join(missing))
+        if int(contract.get("action_journal_version", 0) or 0) < 1 or int(contract.get("action_schema_version", 0) or 0) < 1:
+            raise RuntimeError("Bridge v0.8.1 is required: action journal and strict parameter contract are missing. Upgrade the WordPress plugin before a paid build.")
 
     async def plan(self, user_request: str, renderer: Renderer, site_snapshot: SiteSnapshot, progress=None) -> dict[str, Any]:
         async def report(stage: str, pct: int, detail: str) -> None:

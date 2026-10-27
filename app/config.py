@@ -53,7 +53,15 @@ class Settings(BaseSettings):
 
     # Stable secret for self-contained encrypted WordPress connection tokens.
     backend_token_secret: str | None = None
+    backend_pairing_secret: str | None = None
     backend_key_file: str = "data/backend.key"
+
+    # Set DATABASE_URL to a persistent PostgreSQL service in Render.
+    # SQLite is for local development only and is lost on ephemeral hosting.
+    database_url: str = "sqlite:///./data/jobs-v081.sqlite3"
+    job_retention_days: int = 14
+    max_snapshot_bytes: int = 400_000
+    max_verify_bytes: int = 600_000
 
     allow_insecure_wordpress: bool = False
     allow_private_wordpress: bool = False

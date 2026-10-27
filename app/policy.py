@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .models import AgentRole, BuildAction, PolicyDecision, PolicyOutcome, RiskLevel
+from .action_validation import validate_action
 
 
 @dataclass(frozen=True)
@@ -76,6 +77,10 @@ class PolicyEngine:
             return PolicyDecision(ability=action.ability, risk=rule.risk, outcome=PolicyOutcome.BLOCK, reason="Ability is forbidden by policy.")
         if actor not in rule.allowed_roles:
             return PolicyDecision(ability=action.ability, risk=rule.risk, outcome=PolicyOutcome.BLOCK, reason=f"Role {actor.value} is not allowed to execute this ability.")
+
+        invalid = validate_action(action.ability, action.parameters)
+        if invalid:
+            return PolicyDecision(ability=action.ability, risk=rule.risk, outcome=PolicyOutcome.BLOCK, reason=invalid)
 
         if "plugin" in action.ability and "approved" in action.ability:
             slug = str(action.parameters.get("plugin_slug", ""))

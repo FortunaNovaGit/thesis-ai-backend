@@ -18,8 +18,8 @@ def test_stateless_connection_token_roundtrip(tmp_path: Path):
     creds = codec.decode(site_id, token)
     assert creds is not None
     assert creds.site_url == "https://example.com"
-    assert creds.username == "thesis_ai_builder"
-    assert creds.application_password == "app-password-secret"
+    assert creds.username == ""
+    assert creds.application_password == ""
     assert codec.decode("different-site", token) is None
     assert codec.decode(site_id, token + "x") is None
 
