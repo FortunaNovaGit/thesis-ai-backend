@@ -1,3 +1,5 @@
+> **v0.8.2:** see `INSTALL_V0.8.2_UA.md` and `CHANGELOG_V0.8.2_UA.md` for compact QA verification, idempotent WooCommerce draft products and limitations.
+
 # WordPress Multi-Agent Thesis Backend — v0.8.1
 
 Five-agent artifact-driven WordPress/Elementor builder prototype. See `CHANGELOG_V0.8.1_UA.md` and `INSTALL_V0.8.1_UA.md` for the release.

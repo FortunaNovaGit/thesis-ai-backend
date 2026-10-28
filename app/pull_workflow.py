@@ -85,6 +85,10 @@ class PullPlanningWorkflow:
                     await value
 
         self._validate_bridge_contract(site_snapshot, renderer)
+        if site_snapshot.bridge_contract and any(term in user_request.casefold() for term in ("магазин", "woocommerce", "shop", "ecommerce")):
+            abilities = set(site_snapshot.bridge_contract.get("abilities", []))
+            if "ensure-woocommerce-product-draft" not in abilities:
+                raise RuntimeError("Commerce requires Bridge v0.8.2 ability ensure-woocommerce-product-draft. Update WordPress Bridge before spending API tokens.")
         await report("orchestrator", 8, "Orchestrator is normalizing the request into a compact ProjectBrief")
         brief: ProjectBrief = await self.agents.orchestrate(user_request, renderer)
         # The renderer selected by the user is authoritative.
@@ -123,7 +127,7 @@ class PullPlanningWorkflow:
         experience = reconcile_experience(brief, architecture, experience)
 
         await report("implementation_plan", 64, "Builder agent is reviewing the deterministic implementation manifest")
-        baseline = compile_build_plan(app_spec, experience, site_snapshot, renderer)
+        baseline = compile_build_plan(app_spec, experience, site_snapshot, renderer, user_request=user_request)
         manifest = {
             "project": {"site_type": brief.site_type, "renderer": renderer},
             "capability_resolutions": [x.model_dump(mode="json") for x in capability_resolutions],
@@ -168,7 +172,7 @@ class PullPlanningWorkflow:
             "model_router": self.settings.model_router if self.settings.resolved_agent_mode == "openai" else {"all": "mock"},
             "usage": self.agents.usage.model_dump(mode="json"),
             "budget": self.agents.budget_state(),
-            "architecture_version": "artifact_pipeline_v3_visual",
+            "architecture_version": "artifact_pipeline_v4_commerce",
         }
 
     @staticmethod
@@ -232,12 +236,12 @@ class PullPlanningWorkflow:
 
         required_plugins = {item.plugin_slug for item in app_spec.plugin_plan}
         active_plugins = {str(p.get("slug", "")) for p in snapshot.plugins if p.get("active")}
-        if snapshot.bridge_contract and "ecommerce" in {c.capability for c in architecture.capabilities} and snapshot.commerce.get("published_products", 0) == 0:
+        if snapshot.bridge_contract and "ecommerce" in {c.capability for c in architecture.capabilities} and (int(snapshot.commerce.get("published_products", 0) or 0) + int(snapshot.commerce.get("draft_products", 0) or 0)) == 0:
             issues.append(QualityIssue(
                 id="DET-empty-catalog", category="functional", severity="medium",
-                description="WooCommerce catalog has no published products. Product descriptions on an Elementor page are not actual WooCommerce products.",
+                description="WooCommerce has no products, including drafts. Elementor text is not a WooCommerce catalog.",
                 responsible_agent=AgentRole.BUILDER,
-                suggested_fix="Create and verify WooCommerce product drafts with real product data; do not invent prices or stock.",
+                suggested_fix="Create explicitly requested WooCommerce product drafts; never invent pricing or availability.",
             ))
         missing_plugins = sorted(required_plugins - active_plugins)
         if missing_plugins:
@@ -491,6 +495,7 @@ class PullPlanningWorkflow:
             "thesis-ai-bridge/ensure-approved-plugin",
             "thesis-ai-bridge/ensure-approved-theme",
             "thesis-ai-bridge/ensure-contact-form",
+            "thesis-ai-bridge/ensure-woocommerce-product-draft",
         }
         for item in latest:
             if item.get("executed"):
@@ -519,6 +524,13 @@ class PullPlanningWorkflow:
                     repair_page_slugs.add(issue.id[len(prefix):])
                     if prefix == "DET-render-form-":
                         needs_form_retry = True
+            if issue.id == "DET-demo-products":
+                missing_names = {x.strip() for x in issue.description.split(":", 1)[-1].split(",")}
+                for candidate in build_plan.actions:
+                    if candidate.ability == "thesis-ai-bridge/ensure-woocommerce-product-draft" and candidate.parameters.get("name") in missing_names:
+                        key = (candidate.ability, json.dumps(candidate.parameters, sort_keys=True, ensure_ascii=False))
+                        if key not in seen:
+                            actions.append(candidate); seen.add(key)
             if issue.id == "DET-home":
                 candidate = next((a for a in build_plan.actions if a.ability == "thesis-ai-bridge/set-homepage-by-slug"), None)
                 if candidate:
@@ -558,9 +570,30 @@ class PullPlanningWorkflow:
         experience = ExperienceSpec.model_validate(bundle["experience_spec"])
 
         deterministic = self._deterministic_issues(app_spec, architecture, experience, executions, verification_snapshot)
+        from .agents.runtime import explicitly_named_demo_products
+        expected_product_names = explicitly_named_demo_products(str(bundle.get("user_request", "")))
+        if expected_product_names and "ecommerce" in app_spec.required_capabilities:
+            actual_product_names = {str(name).casefold() for name in verification_snapshot.commerce.get("generated_product_names", [])}
+            missing_products = [name for name in expected_product_names if name.casefold() not in actual_product_names]
+            if missing_products:
+                deterministic.append(QualityIssue(
+                    id="DET-demo-products", category="functional", severity="high",
+                    description="Missing WooCommerce draft products: " + ", ".join(missing_products),
+                    responsible_agent=AgentRole.BUILDER,
+                    suggested_fix="Create only missing explicit-name product drafts, no price or stock.",
+                ))
         qa_evidence = self._compact_qa_evidence(brief, architecture, experience, deterministic, executions, verification_snapshot)
         try:
-            ai_report = await self.agents.quality(qa_evidence)
+            if any(i.severity in {"critical", "high"} for i in deterministic):
+                ai_report = QualityReport(
+                    passed=False,
+                    summary="Deterministic QA detected blocking issues; optional semantic QA skipped to reduce latency and API cost.",
+                    checks_performed=["deterministic pre-QA"],
+                    issues=[],
+                )
+            else:
+                import asyncio
+                ai_report = await asyncio.wait_for(self.agents.quality(qa_evidence), timeout=35)
         except Exception as exc:
             # Deterministic QA remains useful even if the optional semantic QA call
             # hits its budget or transport limit.

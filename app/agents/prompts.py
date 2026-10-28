@@ -83,7 +83,7 @@ CONTENT QUALITY RULES:
 VISUAL COMPOSITION RULES:
 - Treat the first screen as an editorial experience, not a box full of bullet points.
 - On a shop page use product-specific language, distinct collection headings, and
-  a helpful CTA. Do not imitate product listings as plain text if the user wants
+  a helpful CTA. Exact user-specified products are handled as WooCommerce drafts by deterministic code; do not invent prices, product attributes, stock or photographs. Do not imitate product listings as plain text if the user wants
   real products: product catalogs require WooCommerce product objects.
 - Never duplicate "Магазин" or another page H1 as multiple H2s.
 - If product photography is missing, do not fabricate images or claim a visual

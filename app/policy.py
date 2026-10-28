@@ -59,6 +59,7 @@ class PolicyEngine:
         "thesis-ai-bridge/ensure-approved-theme": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
         "thesis-ai-bridge/ensure-contact-form": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
         "thesis-ai-bridge/configure-woocommerce": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
+        "thesis-ai-bridge/ensure-woocommerce-product-draft": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
         "thesis-ai-bridge/apply-acf-model": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
         "acf.apply-model": Rule(RiskLevel.MEDIUM, BUILD_ROLE),
         "woocommerce.configure": Rule(RiskLevel.MEDIUM, BUILD_ROLE),

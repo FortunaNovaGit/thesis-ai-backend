@@ -22,7 +22,7 @@ from .pull_workflow import PullPlanningWorkflow
 from .repository import JobRepository
 
 
-app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.8.1")
+app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.8.2")
 repository = JobRepository(settings.database_url)
 codec = ConnectionTokenCodec(settings.backend_token_secret, Path(settings.backend_key_file))
 
@@ -73,7 +73,9 @@ class PullPlanRequest(BaseModel):
 
 
 class VerifyRequest(BaseModel):
-    bundle: dict[str, Any]
+    # Send plan_job_id instead of the often multi-megabyte Elementor plan.
+    plan_job_id: str | None = None
+    bundle: dict[str, Any] = Field(default_factory=dict)
     executions: list[dict[str, Any]] = Field(default_factory=list)
     verification_snapshot: dict[str, Any]
     repair_attempts: int = Field(default=0, ge=0, le=10)
@@ -127,7 +129,7 @@ def _credentials(site_id: str, authorization: str | None):
 async def health() -> dict[str, Any]:
     return {
         "status": "ok",
-        "version": "0.8.1",
+        "version": "0.8.2",
         "execution_mode": "wordpress_pull",
         "agent_mode": settings.resolved_agent_mode,
         "configured_agent_mode": settings.agent_mode,
@@ -137,7 +139,7 @@ async def health() -> dict[str, Any]:
         "stable_connection_tokens": codec.persistent,
         "pairing_protection_enabled": bool(settings.backend_pairing_secret),
         "agent_output_mode": "artifact_pipeline_json_pydantic",
-        "architecture_version": "artifact_pipeline_v3_visual",
+        "architecture_version": "artifact_pipeline_v4_commerce",
         "job_store": "postgresql" if repository.durable else "sqlite_ephemeral",
         "durable_jobs": repository.durable,
     }
@@ -320,13 +322,52 @@ async def get_plan(site_id: str, job_id: str, authorization: str | None = Header
     return _public_job(job)
 
 
+def _rehydrate_executions(executions: list[dict[str, Any]], bundle: dict[str, Any]) -> list[dict[str, Any]]:
+    """Recover full action parameters locally, without transporting Elementor JSON.
+
+    For verification the client transmits an index into the approved action list,
+    plus concise outcome evidence. A server-side plan is authoritative.
+    Repair actions are additionally reconstructed by ability + slug where possible.
+    """
+    approved = list(bundle.get("approved_actions") or [])
+    result = []
+    for execution in executions:
+        item = dict(execution)
+        index = item.pop("planned_action_index", None)
+        if isinstance(index, int) and 0 <= index < len(approved):
+            item["action"] = dict(approved[index].get("action") or {})
+            item["policy"] = dict(approved[index].get("policy") or {})
+        elif isinstance(item.get("action"), dict):
+            # For repair outcomes, the compact action metadata is retained.
+            # Full original actions are only needed for precise retry.
+            action = item["action"]
+            if not action.get("parameters") and item.get("executed") is False:
+                for original in approved:
+                    candidate = original.get("action") or {}
+                    if candidate.get("ability") == action.get("ability"):
+                        item["action"] = dict(candidate)
+                        break
+        result.append(item)
+    return result
+
+
 @app.post("/v2/sites/{site_id}/verify")
 async def verify_site(site_id: str, payload: VerifyRequest, authorization: str | None = Header(default=None)):
     _credentials(site_id, authorization)
     _body_size(payload, settings.max_verify_bytes)
     try:
+        bundle = payload.bundle
+        if payload.plan_job_id:
+            job = _get_job(payload.plan_job_id, site_id)
+            if not job or job.get("status") != "completed" or not isinstance(job.get("result"), dict):
+                raise HTTPException(status_code=409, detail="Planning job is unavailable; original build plan was not found. No AI verification was charged.")
+            bundle = job["result"]
+            # The site is authenticated by the token, and the plan belongs to
+            # that same site_id; never accept a cross-site plan ID.
+        if not bundle:
+            raise HTTPException(status_code=400, detail="plan_job_id or full planning bundle is required")
         snapshot = SiteSnapshot.model_validate(payload.verification_snapshot)
-        prior_usage = payload.bundle.get("usage", {}) if isinstance(payload.bundle, dict) else {}
+        prior_usage = bundle.get("usage", {})
         remaining_cost = max(0.01, settings.max_build_cost_usd - float(prior_usage.get("estimated_cost_usd", 0.0) or 0.0))
         remaining_tokens = max(1000, settings.max_total_llm_tokens - int(prior_usage.get("total_tokens", 0) or 0))
         remaining_calls = max(1, settings.max_llm_calls - int(prior_usage.get("requests", 0) or 0))
@@ -338,13 +379,15 @@ async def verify_site(site_id: str, payload: VerifyRequest, authorization: str |
         )
         planner = PullPlanningWorkflow(settings, agents)
         result = await planner.verify(
-            bundle=payload.bundle,
-            executions=payload.executions,
+            bundle=bundle,
+            executions=_rehydrate_executions(payload.executions, bundle),
             verification_snapshot=snapshot,
             repair_attempts=payload.repair_attempts,
         )
         repository.report(str(uuid.uuid4()), site_id, result)
         return result
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Verification failed: {exc}") from exc
 

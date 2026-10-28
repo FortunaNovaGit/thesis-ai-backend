@@ -486,11 +486,32 @@ def reconcile_experience(
 
     return experience.model_copy(update={"pages": output})
 
+def explicitly_named_demo_products(user_request: str, *, max_products: int = 4) -> list[str]:
+    """Extract only product names explicitly quoted by the user.
+
+    AI-generated suggestions are deliberately not trusted as product facts.
+    Anything unquoted/ambiguous is omitted; products never receive inferred prices.
+    """
+    quoted = re.findall(r"[«\"]([^»\"]{3,100})[»\"]", user_request or "")
+    result: list[str] = []
+    for raw in quoted:
+        title = " ".join(raw.strip().split())
+        lower = title.casefold()
+        if not any(term in lower for term in ("цукер", "шоколад", "асорті", "пралін", "набір")):
+            continue
+        if title not in result and len(title) <= 100:
+            result.append(title)
+        if len(result) >= max_products:
+            break
+    return result
+
+
 def compile_build_plan(
     app_spec: ApplicationSpec,
     experience_spec: ExperienceSpec,
     snapshot: SiteSnapshot,
     renderer: Renderer,
+    user_request: str = "",
 ) -> BuildPlan:
     actions: list[BuildAction] = []
     active_theme = str(snapshot.structure.get("active_theme_slug", snapshot.site_info.get("theme_slug", "")))
@@ -517,6 +538,18 @@ def compile_build_plan(
             parameters={"currency": "UAH" if app_spec.language.startswith("uk") else "USD"},
             rationale="Configure the basic WooCommerce store",
         ))
+
+    ecommerce_requested = any(p.plugin_slug == "woocommerce" for p in app_spec.plugin_plan) or "ecommerce" in app_spec.required_capabilities
+    if ecommerce_requested:
+        for product_name in explicitly_named_demo_products(user_request):
+            actions.append(BuildAction(
+                ability="thesis-ai-bridge/ensure-woocommerce-product-draft",
+                parameters={
+                    "name": product_name,
+                    "description": "Демонстраційний товар. Склад, ціна, вага, наявність і фотографії потребують підтвердження перед публікацією.",
+                },
+                rationale="Create only the explicitly requested WooCommerce product draft without inventing commercial facts",
+            ))
 
     cpt_models = [ct.model_dump(mode="json") for ct in app_spec.content_types if ct.implementation == "cpt"]
     if cpt_models:
@@ -546,7 +579,7 @@ def compile_build_plan(
                 parameters={
                     "title": page.name,
                     "slug": page.slug,
-                    "elements": compile_elementor_page(exp, experience_spec.design_system, snapshot.media, live_catalog=bool(snapshot.commerce.get("published_products", 0))),
+                    "elements": compile_elementor_page(exp, experience_spec.design_system, snapshot.media, live_catalog=bool(snapshot.commerce.get("published_products", 0)), product_names=explicitly_named_demo_products(user_request)),
                     "settings": {"hide_title": "yes", "page_layout": "elementor_full_width"},
                 },
                 rationale=f"Render {page.name} from the shared component library",
@@ -653,7 +686,7 @@ class MockAgentRuntime(AgentRuntime):
     async def architect(self, brief: ProjectBrief, site_summary: dict[str, Any]) -> ArchitectureBundle:
         slug_map = {
             "Головна": "home", "Послуги": "services", "Лікарі": "doctors", "Про нас": "about",
-            "Про клініку": "about", "Контакти": "contact", "Запис": "booking", "Блог": "blog",
+            "Про клініку": "about", "Магазин": "shop", "Контакти": "contact", "Запис": "booking", "Блог": "blog",
         }
         pages: list[PageIntent] = []
         for name in brief.requested_pages:

@@ -69,6 +69,11 @@ class ContactFormParams(StrictParams):
     title: str = Field(min_length=1, max_length=120)
 
 
+class WooDraftProductParams(StrictParams):
+    name: str = Field(min_length=3, max_length=100)
+    description: str = Field(min_length=5, max_length=500)
+
+
 class CommerceParams(StrictParams):
     currency: str = Field(pattern=r"^[A-Z]{3}$")
 
@@ -91,6 +96,7 @@ SCHEMAS: dict[str, type[BaseModel]] = {
     "thesis-ai-bridge/set-homepage-by-slug": HomeParams,
     "thesis-ai-bridge/ensure-contact-form": ContactFormParams,
     "thesis-ai-bridge/configure-woocommerce": CommerceParams,
+    "thesis-ai-bridge/ensure-woocommerce-product-draft": WooDraftProductParams,
     "thesis-ai-bridge/apply-acf-model": ACFParams,
 }
 

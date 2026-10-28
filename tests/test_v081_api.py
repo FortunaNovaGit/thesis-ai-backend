@@ -14,7 +14,7 @@ def test_connection_plan_and_revocation(tmp_path, monkeypatch):
         with TestClient(api.app) as client:
             health = client.get('/health')
             assert health.status_code == 200
-            assert health.json()['version'] == '0.8.1'
+            assert health.json()['version'] == '0.8.2'
             conn = client.post('/v2/sites/connect', json={"site_url": "https://demo.test", "bridge_version": "0.8.1"})
             assert conn.status_code == 200
             site_id = conn.json()['site_id']

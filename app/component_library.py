@@ -127,6 +127,29 @@ def _surface_card(title: str, body: str, ds: DesignSystem, *, width: int = 31) -
     })
 
 
+def _editorial_product_card(title: str, body: str, ds: DesignSystem, index: int, *, width: int = 48) -> dict[str, Any]:
+    """A controlled, non-purchasable teaser. The real catalog uses WooCommerce."""
+    tone = ds.surface if index % 2 == 0 else ds.background
+    heading = _heading(title, ds.text, ds, level="h3", size=26)
+    eyebrow = _widget("heading", {
+        "title": f"КОЛЕКЦІЯ {index + 1:02d}", "header_size": "div",
+        "title_color": ds.accent, "typography_typography": "custom",
+        "typography_font_family": ds.body_font, "typography_font_size": _px(12),
+        "typography_font_weight": "700",
+    })
+    parts = [eyebrow, heading]
+    if body:
+        parts.append(_text(body, ds.muted, ds, size=16))
+    return _container(parts, {
+        "content_width": "full", "width": _pct(width), "width_mobile": _pct(100),
+        "background_background": "classic", "background_color": tone,
+        "padding": _box(48, 36, 48, 36),
+        "min_height": _px(280), "justify_content": "center",
+        "border_radius": _box(max(10, ds.radius), max(10, ds.radius), max(10, ds.radius), max(10, ds.radius)),
+        "gap": _px(20),
+    })
+
+
 def _split_items(items: list[str]) -> list[tuple[str, str]]:
     result: list[tuple[str, str]] = []
     for item in items[:8]:
@@ -233,10 +256,16 @@ def hero(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] | 
     return _section_shell(section, [row], ds)
 
 
-def cards(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] | None = None, *, live_catalog: bool = False) -> dict[str, Any]:
-    body = _intro(section, ds)
+def cards(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] | None = None, *, live_catalog: bool = False, product_names: list[str] | None = None, h1: bool = False) -> dict[str, Any]:
+    body = _intro(section, ds, h1=h1)
     pairs = _split_items(section.items)
-    item_cards = [_surface_card(title, text, ds, width=31 if len(pairs) >= 3 else 48) for title, text in pairs]
+    if section.section_type == "products" and product_names:
+        # Use only verified explicit product names, never LLM-invented offers.
+        pairs = [(name, "Демонстраційна колекція. Деталі складу, ціни та доступності уточнюються перед публікацією.") for name in product_names[:4]]
+    if section.section_type == "products":
+        item_cards = [_editorial_product_card(title, text, ds, i, width=48 if len(pairs) <= 2 else 31) for i, (title, text) in enumerate(pairs)]
+    else:
+        item_cards = [_surface_card(title, text, ds, width=31 if len(pairs) >= 3 else 48) for title, text in pairs]
     if section.section_type == "products" and live_catalog:
         # Render actual WooCommerce products when present. The shortcode does not
         # create fictitious demo catalog entries.
@@ -353,7 +382,7 @@ COMPONENTS = {
 }
 
 
-def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem, media: list[dict[str, Any]] | None = None, *, live_catalog: bool = False) -> list[dict[str, Any]]:
+def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem, media: list[dict[str, Any]] | None = None, *, live_catalog: bool = False, product_names: list[str] | None = None) -> list[dict[str, Any]]:
     elements: list[dict[str, Any]] = []
     specs = page.section_specs
     if not specs:
@@ -382,7 +411,7 @@ def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem, media: li
         if section_type == "hero":
             elements.append(hero(section, ds, selected_image))
         elif section_type in {"products", "services", "benefits", "trust", "team", "process", "stats"}:
-            elements.append(cards(section, ds, selected_image, live_catalog=live_catalog))
+            elements.append(cards(section, ds, selected_image, live_catalog=live_catalog, product_names=product_names, h1=(index == 0)))
         else:
             elements.append(renderer(section, ds))
     return elements
