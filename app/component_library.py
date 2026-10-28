@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import re
 import secrets
 from typing import Any
 
@@ -12,24 +13,39 @@ def _validated_media_url(asset: dict[str, Any]) -> str:
     return url if url.startswith("https://") and asset.get("id") else ""
 
 
-def choose_page_media(page: PageExperienceSpec, media: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Use only image attachments explicitly returned by the connected WordPress site."""
-    if not media:
+def choose_matching_media(query: str, media: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Match real WordPress attachment metadata, never guess or import a photo.
+
+    Use short word stems to handle Ukrainian inflections (цукерки/цукерок).
+    Generic page labels should never cause unrelated media to appear.
+    """
+    ignored = {"головна", "сторінка", "контакти", "магазин", "додати", "створити", "нашого", "зробити", "перейти", "кнопка"}
+    words = re.findall(r"[^\W\d_]{5,}", query.casefold())
+    stems = {w[:5] for w in words if w not in ignored}
+    if not stems:
         return None
-    target = " ".join([page.page_name, page.page_goal, page.page_slug]).casefold()
-    scored: list[tuple[int, dict[str, Any]]] = []
+    best_score = 0
+    best = None
     for item in media:
-        url = _validated_media_url(item)
-        if not url:
+        if not _validated_media_url(item):
             continue
         description = " ".join(str(item.get(k, "")) for k in ("alt", "title", "caption")).casefold()
-        score = sum(1 for word in target.split() if len(word) > 3 and word in description)
-        scored.append((score, item))
-    if not scored:
-        return None
-    scored.sort(key=lambda pair: pair[0], reverse=True)
-    # Do not put an unrelated product photograph on a page merely because one exists.
-    return scored[0][1] if scored[0][0] > 0 else None
+        # Never assign a 24-piece product photo to a 16-piece card solely
+        # because both share the words "асорті" and "цукерки".
+        quantity_tokens = set(re.findall(r"\b\d+\b", query))
+        if quantity_tokens and not quantity_tokens.issubset(set(re.findall(r"\b\d+\b", description))):
+            continue
+        description_stems = {w[:5] for w in re.findall(r"[^\W\d_]{5,}", description)}
+        score = len(stems.intersection(description_stems))
+        if score > best_score:
+            best_score, best = score, item
+    return best
+
+
+def choose_page_media(page: PageExperienceSpec, media: list[dict[str, Any]]) -> dict[str, Any] | None:
+    text = " ".join([page.page_name, page.page_goal] +
+                    [" ".join([sec.heading, sec.body]) for sec in page.section_specs])
+    return choose_matching_media(text, media)
 
 
 def _image_widget(media: dict[str, Any]) -> dict[str, Any]:
@@ -127,18 +143,18 @@ def _surface_card(title: str, body: str, ds: DesignSystem, *, width: int = 31) -
     })
 
 
-def _editorial_product_card(title: str, body: str, ds: DesignSystem, index: int, *, width: int = 48) -> dict[str, Any]:
+def _editorial_product_card(title: str, body: str, ds: DesignSystem, index: int, *, width: int = 48, media: dict[str, Any] | None = None) -> dict[str, Any]:
     """Editable editorial sample card; deliberately not a purchasable product."""
-    preview = _container([
+    preview = _container(([_image_widget(media)] if media else [
         _widget("heading", {"title": f"{index + 1:02d}", "header_size": "div", "title_color": ds.accent,
                             "typography_typography": "custom", "typography_font_family": ds.heading_font,
                             "typography_font_size": _px(54)}),
         _widget("heading", {"title": "КОЛЕКЦІЯ", "header_size": "div", "title_color": ds.text,
                             "typography_typography": "custom", "typography_font_family": ds.body_font,
                             "typography_font_size": _px(13)}),
-    ], {"content_width": "full", "min_height": _px(205), "justify_content": "center",
-        "align_items": "center", "padding": _box(20,20,20,20),
-        "css_classes": "tai-product-art"})
+    ]), {"content_width": "full", "min_height": _px(205), "justify_content": "center",
+        "align_items": "center", "padding": _box(0,0,0,0) if media else _box(20,20,20,20),
+        "css_classes": "tai-product-art-photo" if media else "tai-product-art"})
     label = _widget("heading", {"title": "ДЕМОНСТРАЦІЙНА КАРТКА", "header_size": "div", "title_color": ds.accent,
                                "typography_typography": "custom", "typography_font_family": ds.body_font,
                                "typography_font_size": _px(11), "typography_font_weight": "700"})
@@ -203,7 +219,7 @@ def _intro(section: SectionContentSpec, ds: DesignSystem, *, h1: bool = False) -
             "typography_font_size": _px(13),
             "typography_font_weight": "700",
         }))
-    out.append(_heading(section.heading, title_color, ds, level="h1" if h1 else "h2", size=48 if h1 else 34))
+    out.append(_heading(section.heading, title_color, ds, level="h1" if h1 else "h2", size=46 if h1 else 34))
     if section.body:
         out.append(_text(section.body, body_color, ds, size=19 if h1 else 17))
     return out
@@ -215,53 +231,48 @@ def hero(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] | 
         left_elements.append(_button(section.cta_label, section.cta_url or "#", ds, accent=section.style_variant == "dark"))
     left = _container(left_elements, {
         "content_width": "full",
-        "width": _pct(60),
+        # Widths + gap must fit the grid: the visual CSS uses minmax(0,fr).
+        "width": _pct(100),
         "width_mobile": _pct(100),
-        "padding": _box(12, 12, 12, 12),
+        "padding": _box(0, 0, 0, 0),
+        "css_classes": "tai-hero-copy",
         "gap": _px(22),
     })
 
     if media:
         # Only media already attached to this WordPress site can become a real image.
         right = _container([_image_widget(media)], {
-            "content_width": "full", "width": _pct(46), "width_mobile": _pct(100),
+            "content_width": "full", "width": _pct(100), "width_mobile": _pct(100),
             "padding": _box(0, 0, 0, 0), "css_classes": "tai-hero-photo",
         })
     else:
-        # Visual art direction without inventing a product photo or publishing
-        # internal planning notes from SectionContentSpec.items.
-        right = _container([
-            _widget("heading", {"title": "✦", "header_size": "div", "title_color": ds.accent,
-                                "typography_typography": "custom", "typography_font_size": _px(64)}),
-            _widget("heading", {"title": "01 / 03", "header_size": "div", "title_color": ds.muted,
-                                "typography_typography": "custom", "typography_font_family": ds.body_font,
-                                "typography_font_size": _px(13)}),
-        ], {
-            "content_width": "full", "width": _pct(46), "width_mobile": _pct(100),
-            "padding": _box(24, 24, 24, 24), "min_height": _px(390),
-            "justify_content": "center", "align_items": "center",
-            "css_classes": "tai-hero-art", "gap": _px(24),
+        # Intentional image slot. Only the CSS artwork is decorative; no AI
+        # planning notes or fictitious product photos are ever displayed.
+        right = _container([], {
+            "content_width": "full", "width": _pct(100), "width_mobile": _pct(100),
+            "padding": _box(0, 0, 0, 0), "min_height": _px(410),
+            "css_classes": "tai-hero-art",
         })
 
     row = _container([left, right], {
         "content_width": "full",
-        "flex_direction": "row",
-        "flex_direction_mobile": "column",
-        "align_items": "center",
-        "gap": _px(52),
-        "padding": _box(0, 0, 0, 0),
+        "flex_direction": "row", "flex_direction_mobile": "column",
+        "align_items": "center", "css_classes": "tai-hero-grid",
+        "gap": _px(32), "padding": _box(0, 0, 0, 0),
     })
     return _section_shell(section, [row], ds)
 
 
-def cards(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] | None = None, *, live_catalog: bool = False, product_names: list[str] | None = None, h1: bool = False) -> dict[str, Any]:
+def cards(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] | None = None, *, live_catalog: bool = False, product_names: list[str] | None = None, h1: bool = False, product_media: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     body = _intro(section, ds, h1=h1)
     pairs = _split_items(section.items)
     if section.section_type == "products" and product_names:
         # Only names explicitly supplied or opt-in placeholder labels. No false offers.
         pairs = [(name, "Чернетка товару — додайте фотографію, склад, алергени та ціну в WooCommerce перед публікацією.") for name in product_names[:4]]
     if section.section_type == "products":
-        item_cards = [_editorial_product_card(title, text, ds, i, width=48 if len(pairs) <= 2 else 31) for i, (title, text) in enumerate(pairs)]
+        item_cards = [_editorial_product_card(title, text, ds, i, width=48 if len(pairs) <= 2 else 31,
+                       media=choose_matching_media(title, product_media or []))
+                      for i, (title, text) in enumerate(pairs)]
     else:
         item_cards = [_surface_card(title, text, ds, width=31 if len(pairs) >= 3 else 48) for title, text in pairs]
     if section.section_type == "products" and live_catalog:
@@ -405,11 +416,13 @@ def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem, media: li
         section_type = section.section_type.lower().strip() or "content"
         if index == 0 and section_type not in {"hero", "products"}:
             section_type = "hero"
+            section = section.model_copy(update={"section_type": "hero"})
         renderer = COMPONENTS.get(section_type, simple_content)
         if section_type == "hero":
             elements.append(hero(section, ds, selected_image))
         elif section_type in {"products", "services", "benefits", "trust", "team", "process", "stats"}:
-            elements.append(cards(section, ds, selected_image, live_catalog=live_catalog, product_names=product_names, h1=(index == 0)))
+            elements.append(cards(section, ds, selected_image, live_catalog=live_catalog,
+                                  product_names=product_names, h1=(index == 0), product_media=media))
         else:
             elements.append(renderer(section, ds))
     return elements
