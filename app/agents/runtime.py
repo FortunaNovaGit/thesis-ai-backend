@@ -300,6 +300,30 @@ def _visitor_defaults(
             h, b, items = page_pack[section_type]
             return {"heading": h, "body": b, "items": items, "cta_label": cta, "cta_url": cta_url}
 
+    chocolatier = any(x in (site_title + " " + brief.primary_goal + " " + brief.site_type).casefold() for x in ("шоколад", "цукерк", "chocolat", "пралін"))
+    if chocolatier:
+        sweets: dict[str, dict[str, tuple[str, str, list[str]]]] = {
+            "home": {
+                "hero": ("Шоколадні моменти, які хочеться дарувати", "Обирайте шоколадні набори для подарунка, святкового столу або особистої маленької радості. Знайдіть свою колекцію в каталозі.", []),
+                "products": ("Колекції для особливих моментів", "Познайомтеся з наборами цукерок і оберіть формат, який вам до душі.", []),
+                "benefits": ("Особливий настрій у кожній коробці", "Подарунковий набір легко перетворює звичайну зустріч на теплий спогад.", ["Для подарунка — привід сказати найважливіше без зайвих слів", "Для близьких — маленький знак уваги в потрібний момент", "Для себе — час уповільнитися й насолодитися миттю"]),
+                "trust": ("Деталі, на які приємно звертати увагу", "Ознайомтеся з асортиментом і запитайте про склад, алергени та наявність перед замовленням.", []),
+                "cta": ("Знайдіть свою шоколадну колекцію", "Перегляньте магазин і оберіть те, чим хочеться поділитися.", []),
+            },
+            "shop": {
+                "hero": ("Колекція шоколадних цукерок", "Перегляньте наші набори. Остаточні дані про склад, алергени й ціни додаються лише після підтвердження.", []),
+                "products": ("Подарункові набори", "Оберіть формат набору, а деталі та доступність уточніть перед замовленням.", []),
+            },
+            "contact": {
+                "hero": ("Поговорімо про ваш шоколадний подарунок", "Маєте запитання щодо наборів або хочете уточнити деталі замовлення? Напишіть нам через форму.", []),
+                "contact": ("Є запитання?", "Напишіть, що саме вас цікавить. Підтверджені контакти й години роботи можна заповнити у WordPress.", []),
+            },
+        }
+        pack = sweets.get(page.slug, {}).get(section_type)
+        if pack:
+            h, b, items = pack
+            return {"heading": h, "body": b, "items": items, "cta_label": cta, "cta_url": cta_url}
+
     generic_headings = {
         "hero": page.name,
         "services": "Що ми пропонуємо",
@@ -345,7 +369,7 @@ def _looks_internal_copy(text: str) -> bool:
     markers = [
         "ця сторінка", "сторінка має", "додайте", "після генерації", "контент секції",
         "мета сторінки", "надати канал", "допомогти зрозуміти", "розкрити принципи",
-        "сформувати довіру", "зменшити friction", "користувач повинен", "пояснити роль сторінки",
+        "сформувати довіру", "зменшити friction", "користувач повинен", "пояснити роль сторінки", "посадкова сторінка", "основна конверсія", "конверсії", "ключове повідомлення", "контент має", "сформувати цінність",
     ]
     return any(m in value for m in markers)
 
@@ -506,6 +530,36 @@ def explicitly_named_demo_products(user_request: str, *, max_products: int = 4) 
     return result
 
 
+def safe_demo_products(user_request: str, *, max_products: int = 4) -> list[str]:
+    """Explicit names take precedence. Optional anonymous templates are clearly drafts.
+
+    Placeholder generation requires a request for demonstration/placeholder stock,
+    not merely a store request. These are not real offerings or purchasable items.
+    """
+    named = explicitly_named_demo_products(user_request, max_products=max_products)
+    if named:
+        return named
+    text = (user_request or "").casefold()
+    if any(x in text for x in ("демонстраційн", "демо-товар", "demo product", "товари-заготовки", "шаблонні товари")) and any(
+        x in text for x in ("магазин", "товар", "woocommerce", "shop", "ecommerce")
+    ):
+        return ["Демо-товар 01 — заповнити", "Демо-товар 02 — заповнити", "Демо-товар 03 — заповнити"][:max_products]
+    return []
+
+
+def site_design_profile(user_request: str, base: DesignSystem) -> DesignSystem:
+    """Optional brand-safe visual preset, without imposing fabricated business facts."""
+    text = (user_request or "").casefold()
+    if any(x in text for x in ("шоколад", "цукерк", "chocolat", "praline", "пралін")):
+        return base.model_copy(update={
+            "primary": "#382219", "accent": "#BC8E49", "background": "#FAF5ED",
+            "surface": "#F1E6D7", "text": "#261A16", "muted": "#6F5B50",
+            "heading_font": "Georgia", "body_font": "Inter", "container_width": 1280,
+            "section_spacing": 88, "radius": 16,
+        })
+    return base
+
+
 def compile_build_plan(
     app_spec: ApplicationSpec,
     experience_spec: ExperienceSpec,
@@ -514,6 +568,7 @@ def compile_build_plan(
     user_request: str = "",
 ) -> BuildPlan:
     actions: list[BuildAction] = []
+    design = site_design_profile(user_request, experience_spec.design_system)
     active_theme = str(snapshot.structure.get("active_theme_slug", snapshot.site_info.get("theme_slug", "")))
     if renderer in {"elementor", "auto"} and active_theme != app_spec.theme_slug:
         actions.append(BuildAction(
@@ -541,7 +596,7 @@ def compile_build_plan(
 
     ecommerce_requested = any(p.plugin_slug == "woocommerce" for p in app_spec.plugin_plan) or "ecommerce" in app_spec.required_capabilities
     if ecommerce_requested:
-        for product_name in explicitly_named_demo_products(user_request):
+        for product_name in safe_demo_products(user_request):
             actions.append(BuildAction(
                 ability="thesis-ai-bridge/ensure-woocommerce-product-draft",
                 parameters={
@@ -573,13 +628,32 @@ def compile_build_plan(
         exp = exp_by_slug.get(page.slug)
         if exp is None:
             continue
+        # Ensure the home page of an ecommerce site always contains a concrete
+        # visual product/collection showcase, even if the LLM omits it.
+        if ecommerce_requested and page.slug == "home" and not any(sec.section_type == "products" for sec in exp.section_specs):
+            sample_section = SectionContentSpec(
+                section_type="products", component_key="product_showcase_v3",
+                heading="Обрані колекції", eyebrow="КОЛЕКЦІЯ",
+                body="Знайдіть свій набір. Деталі товарів доступні для редагування перед публікацією.",
+                items=[], cta_label="Переглянути магазин", cta_url="/shop/",
+                style_variant="soft",
+            )
+            sections = list(exp.section_specs)
+            cta_at = next((i for i, item in enumerate(sections) if item.section_type == "cta"), len(sections))
+            sections.insert(cta_at, sample_section)
+            exp = exp.model_copy(update={"section_specs": sections})
+        # WooCommerce owns the published /shop/ archive. Never overwrite it as an
+        # Elementor draft: that would collide with WC_Install::create_pages().
+        # The product archive is styled by the Bridge storefront stylesheet.
+        if ecommerce_requested and page.slug == "shop":
+            continue
         if renderer in {"elementor", "auto"}:
             actions.append(BuildAction(
                 ability="thesis-ai-bridge/elementor-ensure-draft-page",
                 parameters={
                     "title": page.name,
                     "slug": page.slug,
-                    "elements": compile_elementor_page(exp, experience_spec.design_system, snapshot.media, live_catalog=bool(snapshot.commerce.get("published_products", 0)), product_names=explicitly_named_demo_products(user_request)),
+                    "elements": compile_elementor_page(exp, design, snapshot.media, live_catalog=bool(snapshot.commerce.get("published_products", 0)), product_names=safe_demo_products(user_request)),
                     "settings": {"hide_title": "yes", "page_layout": "elementor_full_width"},
                 },
                 rationale=f"Render {page.name} from the shared component library",
@@ -600,16 +674,16 @@ def compile_build_plan(
         BuildAction(
             ability="thesis-ai-bridge/apply-site-design",
             parameters={
-                "primary": experience_spec.design_system.primary,
-                "accent": experience_spec.design_system.accent,
-                "background": experience_spec.design_system.background,
-                "surface": experience_spec.design_system.surface,
-                "text": experience_spec.design_system.text,
-                "muted": experience_spec.design_system.muted,
-                "heading_font": experience_spec.design_system.heading_font,
-                "body_font": experience_spec.design_system.body_font,
-                "container_width": experience_spec.design_system.container_width,
-                "radius": experience_spec.design_system.radius,
+                "primary": design.primary,
+                "accent": design.accent,
+                "background": design.background,
+                "surface": design.surface,
+                "text": design.text,
+                "muted": design.muted,
+                "heading_font": design.heading_font,
+                "body_font": design.body_font,
+                "container_width": design.container_width,
+                "radius": design.radius,
             },
             rationale="Apply the shared DesignSystem consistently to the WordPress front end",
         ),

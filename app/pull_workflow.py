@@ -88,7 +88,7 @@ class PullPlanningWorkflow:
         if site_snapshot.bridge_contract and any(term in user_request.casefold() for term in ("магазин", "woocommerce", "shop", "ecommerce")):
             abilities = set(site_snapshot.bridge_contract.get("abilities", []))
             if "ensure-woocommerce-product-draft" not in abilities:
-                raise RuntimeError("Commerce requires Bridge v0.8.2 ability ensure-woocommerce-product-draft. Update WordPress Bridge before spending API tokens.")
+                raise RuntimeError("Commerce requires Bridge v0.8.3 ability ensure-woocommerce-product-draft. Update WordPress Bridge before spending API tokens.")
         await report("orchestrator", 8, "Orchestrator is normalizing the request into a compact ProjectBrief")
         brief: ProjectBrief = await self.agents.orchestrate(user_request, renderer)
         # The renderer selected by the user is authoritative.
@@ -291,6 +291,11 @@ class PullPlanningWorkflow:
             "допомогти зрозуміти", "сформувати довіру", "зменшити friction",
         )
         for page in experience.pages:
+            # Shop is a native WooCommerce archive, not a generated Elementor draft.
+            # Audit its existence and real products, but do not apply Elementor-only
+            # section/CTA validation to an archive managed by WooCommerce.
+            if "ecommerce" in app_spec.required_capabilities and page.page_slug == "shop":
+                continue
             headings = [s.heading.strip().casefold() for s in page.section_specs if s.heading.strip()]
             if len(headings) != len(set(headings)):
                 issues.append(QualityIssue(
@@ -333,6 +338,8 @@ class PullPlanningWorkflow:
         # titles/status alone.
         actual_by_slug = {str(p.get("slug", "")): p for p in snapshot.pages}
         for page in experience.pages:
+            if "ecommerce" in app_spec.required_capabilities and page.page_slug == "shop":
+                continue
             actual = actual_by_slug.get(page.page_slug) or {}
             elementor = actual.get("elementor", {}) if isinstance(actual.get("elementor", {}), dict) else {}
             if actual and page.page_slug in required_slugs:

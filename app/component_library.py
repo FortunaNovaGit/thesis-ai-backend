@@ -128,25 +128,29 @@ def _surface_card(title: str, body: str, ds: DesignSystem, *, width: int = 31) -
 
 
 def _editorial_product_card(title: str, body: str, ds: DesignSystem, index: int, *, width: int = 48) -> dict[str, Any]:
-    """A controlled, non-purchasable teaser. The real catalog uses WooCommerce."""
-    tone = ds.surface if index % 2 == 0 else ds.background
-    heading = _heading(title, ds.text, ds, level="h3", size=26)
-    eyebrow = _widget("heading", {
-        "title": f"КОЛЕКЦІЯ {index + 1:02d}", "header_size": "div",
-        "title_color": ds.accent, "typography_typography": "custom",
-        "typography_font_family": ds.body_font, "typography_font_size": _px(12),
-        "typography_font_weight": "700",
-    })
-    parts = [eyebrow, heading]
+    """Editable editorial sample card; deliberately not a purchasable product."""
+    preview = _container([
+        _widget("heading", {"title": f"{index + 1:02d}", "header_size": "div", "title_color": ds.accent,
+                            "typography_typography": "custom", "typography_font_family": ds.heading_font,
+                            "typography_font_size": _px(54)}),
+        _widget("heading", {"title": "КОЛЕКЦІЯ", "header_size": "div", "title_color": ds.text,
+                            "typography_typography": "custom", "typography_font_family": ds.body_font,
+                            "typography_font_size": _px(13)}),
+    ], {"content_width": "full", "min_height": _px(205), "justify_content": "center",
+        "align_items": "center", "padding": _box(20,20,20,20),
+        "css_classes": "tai-product-art"})
+    label = _widget("heading", {"title": "ДЕМОНСТРАЦІЙНА КАРТКА", "header_size": "div", "title_color": ds.accent,
+                               "typography_typography": "custom", "typography_font_family": ds.body_font,
+                               "typography_font_size": _px(11), "typography_font_weight": "700"})
+    elements = [preview, label, _heading(title, ds.text, ds, level="h3", size=24)]
     if body:
-        parts.append(_text(body, ds.muted, ds, size=16))
-    return _container(parts, {
+        elements.append(_text(body, ds.muted, ds, size=15))
+    return _container(elements, {
         "content_width": "full", "width": _pct(width), "width_mobile": _pct(100),
-        "background_background": "classic", "background_color": tone,
-        "padding": _box(48, 36, 48, 36),
-        "min_height": _px(280), "justify_content": "center",
-        "border_radius": _box(max(10, ds.radius), max(10, ds.radius), max(10, ds.radius), max(10, ds.radius)),
-        "gap": _px(20),
+        "background_background": "classic", "background_color": ds.surface,
+        "padding": _box(16, 16, 24, 16),
+        "border_radius": _box(ds.radius, ds.radius, ds.radius, ds.radius),
+        "gap": _px(13), "css_classes": "tai-product-card",
     })
 
 
@@ -176,6 +180,8 @@ def _colors(section: SectionContentSpec, ds: DesignSystem) -> tuple[str, str, st
 def _section_shell(section: SectionContentSpec, body: list[dict[str, Any]], ds: DesignSystem) -> dict[str, Any]:
     bg, _, _ = _colors(section, ds)
     return _container(body, {
+        "content_width": "full",
+        "width": _pct(100),
         "background_background": "classic",
         "background_color": bg,
         "css_classes": f"thesis-ai-section thesis-ai-{section.section_type} thesis-ai-{section.component_key}",
@@ -215,42 +221,34 @@ def hero(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] | 
         "gap": _px(22),
     })
 
-    item_pairs = _split_items(section.items)
     if media:
-        # The image comes from this site's Media Library; never fabricate a stock photo.
+        # Only media already attached to this WordPress site can become a real image.
         right = _container([_image_widget(media)], {
-            "content_width": "full", "width": _pct(40), "width_mobile": _pct(100),
-            "background_background": "classic", "background_color": ds.surface,
-            "padding": _box(12, 12, 12, 12),
-            "border_radius": _box(ds.radius, ds.radius, ds.radius, ds.radius),
+            "content_width": "full", "width": _pct(46), "width_mobile": _pct(100),
+            "padding": _box(0, 0, 0, 0), "css_classes": "tai-hero-photo",
         })
     else:
-        # Abstract editorial hero: no unrelated stock photos or repetitive filler cards.
-        right_bits: list[dict[str, Any]] = []
-        if item_pairs:
-            for title, body in item_pairs[:2]:
-                right_bits.append(_heading(title, "#FFFFFF", ds, level="h3", size=26))
-                if body:
-                    right_bits.append(_text(body, "#FFFFFF", ds, size=16))
-        else:
-            right_bits = [
-                _heading(section.eyebrow or section.heading, "#FFFFFF", ds, level="h3", size=28),
-                _text(section.body[:145] if section.body else "", "#FFFFFF", ds, size=16),
-            ]
-        right = _container(right_bits, {
-            "content_width": "full", "width": _pct(40), "width_mobile": _pct(100),
-            "background_background": "classic", "background_color": ds.primary,
-            "padding": _box(44, 34, 44, 34), "min_height": _px(300),
-            "border_radius": _box(ds.radius, ds.radius, ds.radius, ds.radius),
-            "justify_content": "center", "gap": _px(16),
+        # Visual art direction without inventing a product photo or publishing
+        # internal planning notes from SectionContentSpec.items.
+        right = _container([
+            _widget("heading", {"title": "✦", "header_size": "div", "title_color": ds.accent,
+                                "typography_typography": "custom", "typography_font_size": _px(64)}),
+            _widget("heading", {"title": "01 / 03", "header_size": "div", "title_color": ds.muted,
+                                "typography_typography": "custom", "typography_font_family": ds.body_font,
+                                "typography_font_size": _px(13)}),
+        ], {
+            "content_width": "full", "width": _pct(46), "width_mobile": _pct(100),
+            "padding": _box(24, 24, 24, 24), "min_height": _px(390),
+            "justify_content": "center", "align_items": "center",
+            "css_classes": "tai-hero-art", "gap": _px(24),
         })
 
     row = _container([left, right], {
-        "content_width": "boxed",
+        "content_width": "full",
         "flex_direction": "row",
         "flex_direction_mobile": "column",
         "align_items": "center",
-        "gap": _px(42),
+        "gap": _px(52),
         "padding": _box(0, 0, 0, 0),
     })
     return _section_shell(section, [row], ds)
@@ -260,8 +258,8 @@ def cards(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] |
     body = _intro(section, ds, h1=h1)
     pairs = _split_items(section.items)
     if section.section_type == "products" and product_names:
-        # Use only verified explicit product names, never LLM-invented offers.
-        pairs = [(name, "Демонстраційна колекція. Деталі складу, ціни та доступності уточнюються перед публікацією.") for name in product_names[:4]]
+        # Only names explicitly supplied or opt-in placeholder labels. No false offers.
+        pairs = [(name, "Чернетка товару — додайте фотографію, склад, алергени та ціну в WooCommerce перед публікацією.") for name in product_names[:4]]
     if section.section_type == "products":
         item_cards = [_editorial_product_card(title, text, ds, i, width=48 if len(pairs) <= 2 else 31) for i, (title, text) in enumerate(pairs)]
     else:
