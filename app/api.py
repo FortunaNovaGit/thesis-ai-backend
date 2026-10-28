@@ -22,7 +22,7 @@ from .pull_workflow import PullPlanningWorkflow
 from .repository import JobRepository
 
 
-app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.8.4")
+app = FastAPI(title="WordPress Multi-Agent Thesis API", version="0.8.5")
 repository = JobRepository(settings.database_url)
 codec = ConnectionTokenCodec(settings.backend_token_secret, Path(settings.backend_key_file))
 
@@ -129,7 +129,7 @@ def _credentials(site_id: str, authorization: str | None):
 async def health() -> dict[str, Any]:
     return {
         "status": "ok",
-        "version": "0.8.4",
+        "version": "0.8.5",
         "execution_mode": "wordpress_pull",
         "agent_mode": settings.resolved_agent_mode,
         "configured_agent_mode": settings.agent_mode,
@@ -140,6 +140,7 @@ async def health() -> dict[str, Any]:
         "pairing_protection_enabled": bool(settings.backend_pairing_secret),
         "agent_output_mode": "artifact_pipeline_json_pydantic",
         "architecture_version": "artifact_pipeline_v4_commerce",
+        "editorial_quality_gate": "v1",
         "job_store": "postgresql" if repository.durable else "sqlite_ephemeral",
         "durable_jobs": repository.durable,
     }

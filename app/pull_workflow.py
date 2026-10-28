@@ -4,6 +4,7 @@ import json
 import uuid
 from typing import Any
 
+from .content_quality import audit_experience
 from .agents.runtime import (
     AgentRuntime,
     architecture_to_application_spec,
@@ -125,6 +126,11 @@ class PullPlanningWorkflow:
         await report("design", 46, "Design/Content/SEO agent is creating one coherent site-wide experience")
         experience: ExperienceSpec = await self.agents.design(brief, architecture)
         experience = reconcile_experience(brief, architecture, experience)
+        editorial_issues = audit_experience(experience)
+        if editorial_issues:
+            # Never deploy obviously repeated, internal or unsafe visitor copy.
+            details = "; ".join(f"{i.page}:{i.code}" for i in editorial_issues[:8])
+            raise RuntimeError("Content quality gate blocked deployment: " + details)
 
         await report("implementation_plan", 64, "Builder agent is reviewing the deterministic implementation manifest")
         baseline = compile_build_plan(app_spec, experience, site_snapshot, renderer, user_request=user_request)
@@ -163,6 +169,7 @@ class PullPlanningWorkflow:
             "capability_resolutions": [x.model_dump(mode="json") for x in capability_resolutions],
             "application_spec": app_spec.model_dump(mode="json"),
             "experience_spec": experience.model_dump(mode="json"),
+            "content_quality": {"passed": True, "issues": [], "checks": ["planning_copy", "duplicated_copy", "cta_links"]},
             "build_plan": build_plan.model_dump(mode="json"),
             "approved_actions": gated["allowed"],
             "pending_actions": gated["pending"],

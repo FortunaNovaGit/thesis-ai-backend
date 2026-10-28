@@ -127,8 +127,15 @@ def _button(label: str, url: str, ds: DesignSystem, *, accent: bool = False) -> 
     })
 
 
-def _surface_card(title: str, body: str, ds: DesignSystem, *, width: int = 31) -> dict[str, Any]:
-    elements = [_heading(title, ds.text, ds, level="h3", size=23)]
+def _surface_card(title: str, body: str, ds: DesignSystem, *, width: int = 31, variant: str = "services", index: int = 0) -> dict[str, Any]:
+    elements = []
+    if variant == "process":
+        elements.append(_widget("heading", {
+            "title": f"{index+1:02d}", "header_size": "div", "title_color": ds.accent,
+            "typography_typography": "custom", "typography_font_family": ds.heading_font,
+            "typography_font_size": _px(36), "typography_font_weight": "500",
+        }))
+    elements.append(_heading(title, ds.text, ds, level="h3", size=23))
     if body:
         elements.append(_text(body, ds.muted, ds, size=16))
     return _container(elements, {
@@ -139,7 +146,7 @@ def _surface_card(title: str, body: str, ds: DesignSystem, *, width: int = 31) -
         "background_color": ds.surface,
         "padding": _box(28, 28, 28, 28),
         "border_radius": _box(ds.radius, ds.radius, ds.radius, ds.radius),
-        "gap": _px(12),
+        "gap": _px(12), "css_classes": f"tai-feature-card tai-feature-card-{variant}",
     })
 
 
@@ -268,13 +275,15 @@ def cards(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] |
     pairs = _split_items(section.items)
     if section.section_type == "products" and product_names:
         # Only names explicitly supplied or opt-in placeholder labels. No false offers.
-        pairs = [(name, "Чернетка товару — додайте фотографію, склад, алергени та ціну в WooCommerce перед публікацією.") for name in product_names[:4]]
+        # Keep the customer-facing product showcase free of editor instructions.
+        # Admin-only draft metadata lives in WooCommerce, not on the storefront.
+        pairs = [(name, "") for name in product_names[:4]]
     if section.section_type == "products":
         item_cards = [_editorial_product_card(title, text, ds, i, width=48 if len(pairs) <= 2 else 31,
                        media=choose_matching_media(title, product_media or []))
                       for i, (title, text) in enumerate(pairs)]
     else:
-        item_cards = [_surface_card(title, text, ds, width=31 if len(pairs) >= 3 else 48) for title, text in pairs]
+        item_cards = [_surface_card(title, text, ds, width=31 if len(pairs) >= 3 else 48, variant=section.section_type, index=i) for i, (title, text) in enumerate(pairs)]
     if section.section_type == "products" and live_catalog:
         # Render actual WooCommerce products when present. The shortcode does not
         # create fictitious demo catalog entries.
@@ -287,6 +296,7 @@ def cards(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] |
             "flex_direction": "row",
             "flex_wrap": "wrap",
             "flex_direction_mobile": "column",
+            "css_classes": f"tai-card-grid tai-card-grid-{section.section_type}",
             "gap": _px(18),
             "padding": _box(12, 0, 10, 0),
         }))
@@ -297,8 +307,8 @@ def cards(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] |
 
 def faq(section: SectionContentSpec, ds: DesignSystem) -> dict[str, Any]:
     body = _intro(section, ds)
-    for title, text in _split_items(section.items):
-        body.append(_surface_card(title, text, ds, width=100))
+    for i, (title, text) in enumerate(_split_items(section.items)):
+        body.append(_surface_card(title, text, ds, width=100, variant="faq", index=i))
     return _section_shell(section, body, ds)
 
 

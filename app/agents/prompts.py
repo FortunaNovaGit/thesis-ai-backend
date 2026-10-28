@@ -69,6 +69,23 @@ CONTENT QUALITY RULES:
   use the form "Short title — useful explanation", not a bare label.
 - Give every section a unique visitor-facing heading. Never repeat the page title
   as several H2s and never repeat identical section headings across a page.
+- Write to the visitor, not the website owner: never say "add your photos", "set a price",
+  "fill the information", "this section explains", or describe what a page should do.
+- Create a unique factual angle on EACH page and section. Avoid paraphrasing the
+  same marketing sentence across Home, Products, Contact and all calls to action.
+- Write copy that answers a visitor question. Each paragraph must contain at least
+  one concrete helpful detail, not just "quality, care, professionalism".
+- For ecommerce use customer-decision information: recipient/occasion, format,
+  assortment, how to ask about ingredients, or how ordering works. Do NOT make
+  product properties or prices up; distinguish advice from verified facts.
+- Keep the requested brand name and known facts exact. Do not replace them with
+  generic business descriptions. Missing facts belong in an editor checklist, not
+  inside published-facing text.
+- Produce useful 1-2 sentence card descriptions, rather than single-word cards.
+- Assign a distinct supporting purpose to each component: hero introduces value,
+  products enable comparison, benefits explain use cases, trust provides verified
+  process or policies, CTA makes next step obvious.
+- Never include material that is meant only for an internal planning document.
 - Avoid internal/planning language such as "ця сторінка має", "додайте",
   "після генерації", "контент секції", "мета сторінки", "користувач повинен".
 - Never invent addresses, clinicians, prices, years, awards, statistics, reviews or

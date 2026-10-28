@@ -10,6 +10,7 @@ from pydantic import BaseModel, ValidationError
 from ..budget import BudgetLimits, BudgetTracker
 from ..capabilities import canonicalize_capability, plugin_plan_from_resolutions, resolve_capabilities
 from ..component_library import compile_elementor_page, compile_gutenberg_page
+from ..content_quality import too_similar, looks_like_planning, safe_cta_url
 from ..models import (
     AgentRole,
     AgentUsage,
@@ -277,8 +278,8 @@ def _visitor_defaults(
                 "hero": ("Стоматологія, де зрозуміло кожен наступний крок", "Профілактика, лікування та консультації у зрозумілому форматі. Почніть із вашого запиту — команда допоможе визначити доречний наступний крок.", ["Зрозумілий маршрут — від першого звернення до плану дій", "Турбота про комфорт — спокійна комунікація без зайвого тиску", "Зручний контакт — короткий шлях до консультації"]),
                 "services": ("Основні напрямки стоматологічної допомоги", "Оберіть напрямок, який найбільше відповідає вашій ситуації. Остаточний план визначається після індивідуальної консультації.", ["Профілактика та гігієна — регулярний догляд і підтримка здоров’я ротової порожнини", "Лікування зубів — поетапний підхід до поширених стоматологічних проблем", "Відновлення та естетика — рішення для функції та природного вигляду усмішки"]),
                 "benefits": ("Турбота без зайвої невизначеності", "Хороший досвід починається з чіткої комунікації та зрозумілих наступних кроків.", ["Спочатку — ваш запит — з’ясовуємо, що саме турбує і який результат важливий", "Потім — зрозумілий план — пояснюємо можливі наступні кроки простою мовою", "Далі — зручний зв’язок — залишайте заявку, коли готові перейти до консультації"]),
-                "trust": ("Прозорий підхід до взаємодії", "Без вигаданих обіцянок і гучних цифр: сайт фокусується на зрозумілому сервісі та підтверджених даних.", ["Чітка комунікація — запитання можна уточнити до візиту", "Послідовність — кожен етап має зрозумілий наступний крок", "Редагованість — фактичні дані клініки легко додати у WordPress"]),
-                "team": ("Люди, які пояснюють і допомагають", "Знайомство з фахівцями має починатися з підтверджених імен, ролей та досвіду. Поки цих даних немає, сторінка не вигадує профілі — їх можна додати після уточнення інформації клініки.", ["Профілі без вигаданих фактів", "Зрозуміле пояснення ролі спеціаліста", "Можливість швидко перейти до консультації"]),
+                "trust": ("Прозорий підхід до взаємодії", "Перш ніж обрати наступний крок, дізнайтеся, як відбуваються консультації та як поставити запитання команді клініки.", ["Чітка комунікація — запитання можна уточнити до візиту", "Послідовність — кожен етап має зрозумілий наступний крок", "Редагованість — фактичні дані клініки легко додати у WordPress"]),
+                "team": ("Люди, які пояснюють і допомагають", "Поставте запитання щодо напряму лікування та уточніть, який спеціаліст проводить потрібну консультацію.", ["Зрозуміле пояснення спеціалізації", "Можливість уточнити потрібний напрямок", "Можливість швидко перейти до консультації"]),
                 "cta": ("Готові обговорити ваш запит?", "Залиште звернення — команда клініки зможе уточнити деталі та запропонувати наступний крок.", []),
             },
             "services": {
@@ -290,7 +291,7 @@ def _visitor_defaults(
             },
             "contact": {
                 "hero": ("Зв’яжіться з клінікою зручним способом", "Поставте запитання або залиште заявку на консультацію. Контактні дані можна доповнити підтвердженою адресою, телефоном і графіком роботи.", ["Запитання перед візитом", "Заявка на консультацію", "Уточнення наступного кроку"]),
-                "contact": ("Є запитання перед візитом?", "Напишіть, що саме вас цікавить. Якщо у вихідному запиті не було адреси чи телефону, ми не вигадуємо їх — підтверджені дані можна додати у WordPress.", ["Телефон — додайте підтверджений номер клініки", "Email — додайте робочу адресу для звернень", "Адреса і графік — заповніть фактичними даними клініки"]),
+                "contact": ("Є запитання перед візитом?", "Напишіть, що саме вас цікавить. Скористайтеся формою звернення, щоб уточнити можливість консультації та організаційні деталі перед візитом.", ["Зв’язок — залиште контакт для відповіді через форму", "Запитання — уточніть підготовку до першого візиту", "Візит — перевірте адресу й актуальний графік до приїзду"]),
                 "booking": ("Залиште заявку на консультацію", "Коротко опишіть ваш запит і залиште контакт для відповіді. Не надсилайте через форму зайві медичні або інші чутливі дані.", []),
                 "cta": ("Готові зробити перший крок?", "Залиште звернення — команда клініки зв’яжеться з вами після отримання заявки.", []),
             },
@@ -311,12 +312,12 @@ def _visitor_defaults(
                 "cta": ("Знайдіть свою шоколадну колекцію", "Перегляньте магазин і оберіть те, чим хочеться поділитися.", []),
             },
             "shop": {
-                "hero": ("Колекція шоколадних цукерок", "Перегляньте наші набори. Остаточні дані про склад, алергени й ціни додаються лише після підтвердження.", []),
+                "hero": ("Колекція шоколадних цукерок", "Перегляньте шоколадні набори та порівняйте формати. Перед оформленням замовлення уточніть склад і наявність.", []),
                 "products": ("Подарункові набори", "Оберіть формат набору, а деталі та доступність уточніть перед замовленням.", []),
             },
             "contact": {
                 "hero": ("Поговорімо про ваш шоколадний подарунок", "Маєте запитання щодо наборів або хочете уточнити деталі замовлення? Напишіть нам через форму.", []),
-                "contact": ("Є запитання?", "Напишіть, що саме вас цікавить. Підтверджені контакти й години роботи можна заповнити у WordPress.", []),
+                "contact": ("Є запитання?", "Напишіть, щоб уточнити асортимент, склад наборів або деталі замовлення. Ми допоможемо зорієнтуватися з вибором.", []),
             },
         }
         pack = sweets.get(page.slug, {}).get(section_type)
@@ -344,9 +345,9 @@ def _visitor_defaults(
         "services": "Перегляньте основні напрямки та знайдіть варіант, який відповідає вашому запиту.",
         "benefits": "Ключові переваги подані просто й конкретно, щоб рішення було легше прийняти.",
         "trust": "Фокус на прозорій комунікації, підтверджених даних і зрозумілих наступних кроках.",
-        "team": "Додайте підтверджені профілі фахівців, щоб відвідувачі могли познайомитися з командою без вигаданих фактів.",
+        "team": "Уточніть спеціаліста та формат консультації перед записом. Так ви зможете обрати потрібний напрямок.",
         "process": "Короткий послідовний маршрут допомагає зрозуміти, що відбувається після першого звернення.",
-        "stats": "Тут варто використовувати лише перевірені цифри та факти, які надав власник сайту.",
+        "stats": "Уточніть деталі послуги або товару перед рішенням — актуальні відомості можна отримати під час звернення.",
         "faq": "Відповіді на типові запитання допомагають відвідувачеві швидше зорієнтуватися перед зверненням.",
         "contact": "Оберіть зручний спосіб зв’язку або залиште коротке звернення через форму.",
         "booking": "Залиште контакт і коротко опишіть запит — команда зможе повернутися з відповіддю.",
@@ -407,11 +408,25 @@ def reconcile_experience(
     exp_by_name = {p.page_name: p for p in experience.pages}
     output: list[PageExperienceSpec] = []
     global_h1s: set[str] = set()
+    global_bodies: list[str] = []
 
     for page in architecture.pages:
         existing = exp_by_slug.get(page.slug) or exp_by_name.get(page.name)
         matrix = matrix_by_slug.get(page.slug)
         required_types = list(dict.fromkeys(page.section_goals or ["hero", "content", "cta"]))
+        # The designer can add up to two meaningful editorial components; previously
+        # every new type was silently discarded, producing repetitive templates.
+        if existing is not None:
+            optional = {"faq", "process", "benefits", "trust", "products", "services", "content"}
+            for proposed in existing.section_specs:
+                kind = proposed.section_type.strip().lower()
+                if (kind in optional and kind not in required_types
+                    and proposed.heading.strip() and not looks_like_planning(proposed.heading)
+                    and proposed.body.strip() and not looks_like_planning(proposed.body)
+                    and len(required_types) < len(page.section_goals or []) + 2):
+                    required_types.append(kind)
+            if "cta" in required_types:
+                required_types = [x for x in required_types if x != "cta"] + ["cta"]
         incoming_by_type: dict[str, list[SectionContentSpec]] = {}
         if existing is not None:
             for sec in existing.section_specs:
@@ -419,6 +434,7 @@ def reconcile_experience(
 
         specs: list[SectionContentSpec] = []
         used_headings: set[str] = set()
+        used_bodies: list[str] = []
         for index, section_type in enumerate(required_types):
             fallback = _default_section(brief, page, section_type, matrix, architecture.site_title)
             candidates = incoming_by_type.get(section_type, [])
@@ -428,10 +444,16 @@ def reconcile_experience(
             body = (sec.body or "").strip()
             if not heading or (index > 0 and heading.casefold() == page.name.casefold()) or heading.casefold() in used_headings or _looks_internal_copy(heading):
                 heading = fallback.heading
-            if not body or len(body) < 45 or _looks_internal_copy(body):
+            if (not body or len(body) < 45 or _looks_internal_copy(body) or looks_like_planning(body)
+                or any(too_similar(body, prev) for prev in [*used_bodies, *global_bodies])):
                 body = fallback.body
+            # A fallback must not copy generic planning text into another section.
+            if any(too_similar(body, prev) for prev in [*used_bodies, *global_bodies]):
+                body = ""
 
-            items = [x.strip() for x in sec.items if str(x).strip()]
+            items = list(dict.fromkeys(
+                x.strip() for x in sec.items if str(x).strip() and not looks_like_planning(str(x))
+            ))
             if section_type in {"services", "benefits", "trust", "team", "process", "stats", "faq"} and len(items) < 3:
                 items = list(dict.fromkeys([*items, *fallback.items]))[:6]
             if section_type in {"hero", "contact"} and not items and fallback.items:
@@ -442,8 +464,8 @@ def reconcile_experience(
             if section_type in {"hero", "cta"} and not cta_label:
                 cta_label = fallback.cta_label
                 cta_url = fallback.cta_url
-            if cta_label and not cta_url:
-                cta_url = fallback.cta_url
+            if cta_label and not safe_cta_url(cta_url):
+                cta_url = fallback.cta_url if safe_cta_url(fallback.cta_url) else "/"
 
             component_key = sec.component_key or fallback.component_key
             style_variant = sec.style_variant or fallback.style_variant
@@ -460,6 +482,9 @@ def reconcile_experience(
                 "style_variant": style_variant,
             })
             used_headings.add(heading.casefold())
+            if body:
+                used_bodies.append(body)
+                global_bodies.append(body)
             specs.append(sec)
 
         fallback_seo = SeoSpec(
