@@ -10,6 +10,7 @@ from pydantic import BaseModel, ValidationError
 from ..budget import BudgetLimits, BudgetTracker
 from ..capabilities import canonicalize_capability, plugin_plan_from_resolutions, resolve_capabilities
 from ..component_library import compile_elementor_page, compile_gutenberg_page
+from ..generative_design import validate_creative_layout
 from ..content_quality import too_similar, looks_like_planning, safe_cta_url
 from ..models import (
     AgentRole,
@@ -23,6 +24,7 @@ from ..models import (
     ContentMatrixRow,
     DesignSystem,
     ExperienceSpec,
+    CreativeDirection, GenerativeDesignSpec, PageLayoutSpec, SectionLayoutSpec,
     PageExperienceSpec,
     PageIntent,
     PageRequirement,
@@ -533,7 +535,43 @@ def reconcile_experience(
             seo=seo,
         ))
 
-    return experience.model_copy(update={"pages": output})
+    # Normalize the AI's section-index layout references after mandatory
+    # architecture sections have been reconciled. Without this mapping a new
+    # section would silently inherit the geometry intended for a different one.
+    creative = experience.generative_design
+    if creative is not None:
+        raw_pages = {p.page_slug: p for p in experience.pages}
+        normalized_pages = {p.page_slug: p for p in output}
+        mapped_layouts: list[PageLayoutSpec] = []
+        for page_layout in creative.page_layouts:
+            before = raw_pages.get(page_layout.page_slug)
+            after = normalized_pages.get(page_layout.page_slug)
+            if not before or not after:
+                mapped_layouts.append(page_layout)  # validator reports unknown slugs.
+                continue
+            mapped_sections: list[SectionLayoutSpec] = []
+            used_positions: set[int] = set()
+            for section in page_layout.sections:
+                if section.section_index >= len(before.section_specs):
+                    mapped_sections.append(section)  # fail closed in validation.
+                    continue
+                before_type = before.section_specs[section.section_index].section_type
+                # Occurrence-aware match retains the layout intent when both a
+                # required and an optional section have the same semantic type.
+                occur = sum(1 for old in before.section_specs[:section.section_index + 1]
+                            if old.section_type == before_type)
+                positions = [i for i, new in enumerate(after.section_specs)
+                             if new.section_type == before_type]
+                if len(positions) < occur:
+                    continue  # Creative layout for an unused optional section.
+                new_index = positions[occur - 1]
+                if new_index not in used_positions:
+                    mapped_sections.append(section.model_copy(update={"section_index": new_index}))
+                    used_positions.add(new_index)
+            if mapped_sections:
+                mapped_layouts.append(page_layout.model_copy(update={"sections": mapped_sections}))
+        creative = creative.model_copy(update={"page_layouts": mapped_layouts})
+    return experience.model_copy(update={"pages": output, "generative_design": creative})
 
 def explicitly_named_demo_products(user_request: str, *, max_products: int = 4) -> list[str]:
     """Extract only product names explicitly quoted by the user.
@@ -593,7 +631,10 @@ def compile_build_plan(
     user_request: str = "",
 ) -> BuildPlan:
     actions: list[BuildAction] = []
-    design = site_design_profile(user_request, experience_spec.design_system)
+    # A real Creative Director palette must never be overwritten by the old
+    # industry preset (which made every chocolate site look identical).
+    design = (experience_spec.design_system if experience_spec.generative_design
+              else site_design_profile(user_request, experience_spec.design_system))
     active_theme = str(snapshot.structure.get("active_theme_slug", snapshot.site_info.get("theme_slug", "")))
     if renderer in {"elementor", "auto"} and active_theme != app_spec.theme_slug:
         actions.append(BuildAction(
@@ -648,6 +689,7 @@ def compile_build_plan(
             rationale="Create the reusable booking/contact form",
         ))
 
+    creative_layouts = validate_creative_layout(experience_spec, required=False)
     exp_by_slug = {p.page_slug: p for p in experience_spec.pages}
     for page in app_spec.pages:
         exp = exp_by_slug.get(page.slug)
@@ -667,6 +709,11 @@ def compile_build_plan(
             cta_at = next((i for i, item in enumerate(sections) if item.section_type == "cta"), len(sections))
             sections.insert(cta_at, sample_section)
             exp = exp.model_copy(update={"section_specs": sections})
+            if page.slug in creative_layouts:
+                current_layout = creative_layouts[page.slug]
+                shifted = [x.model_copy(update={"section_index": x.section_index + (1 if x.section_index >= cta_at else 0)})
+                           for x in current_layout.sections]
+                creative_layouts[page.slug] = current_layout.model_copy(update={"sections": shifted})
         # WooCommerce owns the published /shop/ archive. Never overwrite it as an
         # Elementor draft: that would collide with WC_Install::create_pages().
         # The product archive is styled by the Bridge storefront stylesheet.
@@ -678,7 +725,7 @@ def compile_build_plan(
                 parameters={
                     "title": page.name,
                     "slug": page.slug,
-                    "elements": compile_elementor_page(exp, design, snapshot.media, live_catalog=bool(snapshot.commerce.get("published_products", 0)), product_names=safe_demo_products(user_request)),
+                    "elements": compile_elementor_page(exp, design, snapshot.media, layout=creative_layouts.get(page.slug), live_catalog=bool(snapshot.commerce.get("published_products", 0)), product_names=safe_demo_products(user_request)),
                     "settings": {"hide_title": "yes", "page_layout": "elementor_full_width"},
                 },
                 rationale=f"Render {page.name} from the shared component library",
@@ -866,11 +913,30 @@ class MockAgentRuntime(AgentRuntime):
                     schema_types=["WebPage"],
                 ),
             ))
+        # Offline-only creative fixture: concept alternatives are explicit for
+        # tests. Real novelty is produced by the Design LLM, not these labels.
+        mock_layouts = [PageLayoutSpec(page_slug=p.page_slug, sections=[
+            SectionLayoutSpec(section_index=i,
+                              composition=("split" if i == 0 else ("offset" if i % 3 == 1 else "stacked")),
+                              media_position="start" if i % 2 else "end",
+                              text_width_pct=50 if i == 0 else 60,
+                              card_columns=2 if i % 2 else 3,
+                              art_ratio="landscape" if i % 2 else "portrait",
+                              motif="lines" if i % 2 else "halo")
+            for i, _ in enumerate(p.section_specs)]) for p in pages]
         return ExperienceSpec(
             design_direction="Modern clinical: spacious, trustworthy, minimal, conversion-oriented",
             design_system=DesignSystem(primary="#174E72", accent="#3AA6C9", background="#FFFFFF", surface="#F4F8FB", text="#102235", muted="#5A6B7C", radius=18),
-            component_rules=["One shared design system", "Use deterministic component library", "One main CTA hierarchy"],
+            component_rules=["Native editable containers", "Safe bounded creative geometry", "One CTA hierarchy"],
             pages=pages,
+            generative_design=GenerativeDesignSpec(
+                candidates=[
+                    CreativeDirection(id="editorial", name="Editorial daylight", narrative="Clear content with calm reading rhythm and warm spacing.", composition="Alternating inset editorial rows", typographic_contrast="Light geometric heading contrast", visual_motif="Delicate editorial line work"),
+                    CreativeDirection(id="architectural", name="Architectural rhythm", narrative="Structured modular composition with contrasting sections.", composition="Asymmetric grid compositions", typographic_contrast="Large restrained headings", visual_motif="Soft graphic frames"),
+                ],
+                selected_direction_id="editorial", selection_reason="Offline deterministic fixture checks layout compilation without API usage.",
+                page_layouts=mock_layouts,
+            ),
         )
 
     async def build(self, implementation_manifest: dict[str, Any]) -> BuildPlan:
@@ -946,7 +1012,7 @@ def _compact_schema(model: type[BaseModel]) -> str:
 HINTS: dict[str, str] = {
     "ProjectBrief": "Keys: site_type, language, primary_goal, secondary_goals[], audiences[], tone, renderer, requested_pages[], requirements[], known_facts{}, missing_facts[], constraints[].",
     "ArchitectureBundle": "Keys: site_title, tagline, theme_slug, pages[{name,slug,purpose,search_intent,primary_cta,primary_cta_url,section_goals[]}], capabilities[{capability,reason,priority}], content_types[], content_matrix[{page_slug,page_goal,search_intent,primary_cta,secondary_cta,key_messages[],internal_links[]}], security_requirements[], performance_requirements[].",
-    "ExperienceSpec": "Keys: design_direction, design_system{primary,accent,background,surface,text,muted,heading_font,body_font,container_width,section_spacing,radius}, component_rules[], pages[{page_name,page_slug,page_goal,sections[],section_specs[{section_type,component_key,section_goal,eyebrow,heading,body,items[],cta_label,cta_url,style_variant}],content_guidance[],responsive_notes[],accessibility_notes[],seo{slug,title,meta_description,h1,internal_link_targets[],schema_types[]}}].",
+    "ExperienceSpec": "Keys: generative_design{candidates[2-3]{id,name,narrative,composition,typographic_contrast,visual_motif},selected_direction_id,selection_reason,page_layouts[{page_slug,sections[{section_index,composition:split|stacked|centered|offset,media_position:start|end,text_width_pct:35..70,max_width:720..1440,vertical_space:36..168,art_ratio:square|portrait|landscape|wide,motif:none|halo|lines|frame|gradient,card_columns:1..4,heading_emphasis:calm|balanced|dramatic}]}]}, design_direction, design_system{primary,accent,background,surface,text,muted,heading_font,body_font,container_width,section_spacing,radius}, component_rules[], pages[{page_name,page_slug,page_goal,sections[],section_specs[{section_type,component_key,section_goal,eyebrow,heading,body,items[],cta_label,cta_url,style_variant}],content_guidance[],responsive_notes[],accessibility_notes[],seo{slug,title,meta_description,h1,internal_link_targets[],schema_types[]}}].",
     "BuildPlan": "Keys: actions[{ability,parameters{},rationale}]. Keep actions minimal.",
     "QualityReport": "Keys: passed, summary, checks_performed[], issues[{id,category,severity,description,responsible_agent,suggested_fix}].",
 }

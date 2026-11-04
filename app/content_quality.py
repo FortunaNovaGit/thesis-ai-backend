@@ -58,17 +58,21 @@ class EditorialIssue:
     code: str
     page: str
     detail: str
+    section_index: int | None = None
+    section_type: str = ""
 
-    def as_dict(self) -> dict[str, str]:
-        return {"code": self.code, "page": self.page, "detail": self.detail}
+    def as_dict(self) -> dict[str, str | int | None]:
+        return {"code": self.code, "page": self.page, "detail": self.detail,
+                "section_index": self.section_index, "section_type": self.section_type}
 
 
 def audit_experience(experience: ExperienceSpec) -> list[EditorialIssue]:
     issues: list[EditorialIssue] = []
     body_history: list[tuple[str, str]] = []
+    site_headings: dict[str, str] = {}
     for page in experience.pages:
         headings: set[str] = set()
-        for section in page.section_specs:
+        for section_index, section in enumerate(page.section_specs):
             if section.section_type == "hero" and len(canonical(section.body)) < 20:
                 issues.append(EditorialIssue("empty_hero", page.page_slug, "Hero lacks useful introduction"))
             if not section.body.strip() and not section.items and section.section_type not in {"products", "stats"}:
@@ -77,8 +81,14 @@ def audit_experience(experience: ExperienceSpec) -> list[EditorialIssue]:
                 issues.append(EditorialIssue("planning_copy", page.page_slug, section.section_type))
             heading = canonical(section.heading)
             if heading and heading in headings:
-                issues.append(EditorialIssue("duplicate_heading", page.page_slug, section.heading))
+                issues.append(EditorialIssue("duplicate_heading", page.page_slug, section.heading, section_index, section.section_type))
+            elif heading and heading in site_headings and site_headings[heading] != page.page_slug:
+                issues.append(EditorialIssue("repeated_site_heading", page.page_slug,
+                                             f"{section.heading} (also on {site_headings[heading]})",
+                                             section_index, section.section_type))
             headings.add(heading)
+            if heading:
+                site_headings.setdefault(heading, page.page_slug)
             if any(looks_like_planning(item) for item in section.items):
                 issues.append(EditorialIssue("planning_item", page.page_slug, section.section_type))
             items_seen: set[str] = set()

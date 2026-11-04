@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 import uuid
+import secrets
 from typing import Any
 
 from .content_quality import audit_experience
+from .editorial_repair import repair_duplicate_headings
+from .generative_design import validate_creative_layout
 from .agents.runtime import (
     AgentRuntime,
     architecture_to_application_spec,
@@ -124,12 +127,19 @@ class PullPlanningWorkflow:
                 raise RuntimeError("WordPress filesystem method '" + method + "' prevents unattended plugin installation. Install these approved plugins manually, then retry: " + ", ".join(install_needed))
 
         await report("design", 46, "Design/Content/SEO agent is creating one coherent site-wide experience")
-        experience: ExperienceSpec = await self.agents.design(brief, architecture)
+        creative_seed = secrets.token_hex(8)
+        creative_brief = brief.model_copy(update={"creative_seed": creative_seed})
+        experience: ExperienceSpec = await self.agents.design(creative_brief, architecture)
         experience = reconcile_experience(brief, architecture, experience)
+        experience, editorial_repairs = repair_duplicate_headings(experience)
+        if renderer in {"elementor", "auto"} and self.settings.resolved_agent_mode == "openai":
+            # Enforce an actual generative output, not silent fallback to a fixed
+            # 0.8.x layout if the Creative Director omits its new contract.
+            validate_creative_layout(experience, required=True)
         editorial_issues = audit_experience(experience)
         if editorial_issues:
             # Never deploy obviously repeated, internal or unsafe visitor copy.
-            details = "; ".join(f"{i.page}:{i.code}" for i in editorial_issues[:8])
+            details = "; ".join(f"{i.page}:section[{i.section_index}]:{i.code} ({i.detail[:70]})" for i in editorial_issues[:8])
             raise RuntimeError("Content quality gate blocked deployment: " + details)
 
         await report("implementation_plan", 64, "Builder agent is reviewing the deterministic implementation manifest")
@@ -169,7 +179,10 @@ class PullPlanningWorkflow:
             "capability_resolutions": [x.model_dump(mode="json") for x in capability_resolutions],
             "application_spec": app_spec.model_dump(mode="json"),
             "experience_spec": experience.model_dump(mode="json"),
-            "content_quality": {"passed": True, "issues": [], "checks": ["planning_copy", "duplicated_copy", "cta_links"]},
+            "creative_seed": creative_seed,
+            "creative_direction": (experience.generative_design.selected().model_dump(mode="json")
+                                   if experience.generative_design else None),
+            "content_quality": {"passed": True, "issues": [], "repairs": [r.as_dict() for r in editorial_repairs], "checks": ["planning_copy", "duplicated_copy", "cta_links"]},
             "build_plan": build_plan.model_dump(mode="json"),
             "approved_actions": gated["allowed"],
             "pending_actions": gated["pending"],

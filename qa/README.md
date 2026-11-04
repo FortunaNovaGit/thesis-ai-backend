@@ -1,6 +1,8 @@
-# Offline layout smoke
+# Offline browser geometry QA
 
-This is a synthetic Elementor-like CSS fixture and does **not** inspect a real WordPress site.
-It asserts that a long Ukrainian heading never horizontally overlaps the right art panel at 1440px, and that at 900px/390px there is no horizontal scroll. Images in `qa/preview-*.png` are for internal review only and not real WP screenshots.
+This directory contains two **synthetic Elementor-like DOM** smoke tests. Neither opens a real WordPress preview or invokes OpenAI.
 
-On a machine with Playwright and Chromium installed run `python qa/layout_smoke.py`. The source visual stylesheet is under the companion WordPress plugin at `../plugin/thesis-ai-bridge/assets/front.css`.
+- `python qa/layout_smoke.py`: original v0.8.4 hero width regression.
+- `python qa/generative_layout_smoke.py`: v0.9.0 four creative combinations × desktop 1440 / tablet 900 / mobile 390, asserting no horizontal overflow, no heading/art intersection, CTA within viewport. The screenshots are written under `../synthetic-layout-evidence/` for review.
+
+Requires `pip install playwright` and `/usr/bin/chromium` (or adapt the script for your system browser). Run from backend working directory with companion plugin checked out at `../plugin/thesis-ai-bridge/assets/front.css` for the CSS fixture. This is **not** a substitute for actual staging WordPress / Elementor E2E or accessible contrast checks.

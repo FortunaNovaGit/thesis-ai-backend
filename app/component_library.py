@@ -3,9 +3,11 @@ from __future__ import annotations
 import html
 import re
 import secrets
+import hashlib
 from typing import Any
 
-from .models import DesignSystem, PageExperienceSpec, SectionContentSpec
+from .models import DesignSystem, PageExperienceSpec, SectionContentSpec, PageLayoutSpec, SectionLayoutSpec
+from .generative_design import section_layout
 
 
 def _validated_media_url(asset: dict[str, Any]) -> str:
@@ -343,8 +345,6 @@ def contact(section: SectionContentSpec, ds: DesignSystem) -> dict[str, Any]:
             side_elements.append(_heading(title, ds.primary, ds, level="h4", size=18))
             if body:
                 side_elements.append(_text(body, ds.muted, ds, size=15))
-    else:
-        side_elements.append(_text("Вкажіть підтверджені телефон, email, адресу та графік роботи у редакторі, якщо їх не було у вихідному запиті.", ds.muted, ds, size=15))
     if section.cta_label:
         side_elements.append(_button(section.cta_label, section.cta_url or "#", ds))
     right = _container(side_elements, {
@@ -401,7 +401,49 @@ COMPONENTS = {
 }
 
 
-def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem, media: list[dict[str, Any]] | None = None, *, live_catalog: bool = False, product_names: list[str] | None = None) -> list[dict[str, Any]]:
+def _apply_generative_layout(element: dict[str, Any], spec: SectionLayoutSpec, *, page_slug: str, index: int) -> None:
+    """Only bounded native Elementor controls + allowlisted CSS classes.
+
+    All copy/images remain separate editable Elementor widgets. No raw CSS or
+    arbitrary selectors from an LLM make it into the execution plan.
+    """
+    root = element["settings"]
+    # Quantization is a safe geometry constraint, not a selection of site templates.
+    split = min(70, max(35, round(spec.text_width_pct / 5) * 5))
+    max_width = min((960, 1120, 1280, 1440), key=lambda n: abs(n - spec.max_width))
+    classes = [root.get("css_classes", ""), "tai-generative", f"tai-layout-{spec.composition}",
+               f"tai-media-{spec.media_position}", f"tai-split-{split}",
+               f"tai-max-{max_width}", f"tai-motif-{spec.motif}",
+               f"tai-ratio-{spec.art_ratio}", f"tai-heading-{spec.heading_emphasis}",
+               f"tai-columns-{spec.card_columns}"]
+    root["css_classes"] = " ".join(classes)
+    root["padding"] = _box(spec.vertical_space, 24, spec.vertical_space, 24)
+    # Stable root ID permits targeted delta repair and section-level comparisons.
+    element["id"] = hashlib.sha256(f"thesis-ai:{page_slug}:{index}".encode()).hexdigest()[:8]
+    # Elementor-native widths still apply when the companion CSS is not loaded.
+    descendants = element.get("elements", [])
+    for descendant in descendants:
+        settings = descendant.get("settings", {})
+        if "tai-hero-grid" in settings.get("css_classes", ""):
+            settings["flex_direction"] = "column" if spec.composition in {"stacked", "centered"} else "row"
+            settings["flex_direction_mobile"] = "column"
+            settings["gap"] = _px(32)
+            for child_index, child in enumerate(descendant.get("elements", [])):
+                child_settings = child.get("settings", {})
+                if spec.composition in {"split", "offset"}:
+                    width = split if child_index == 0 else 100 - split
+                    child_settings["width"] = _pct(width)
+                else:
+                    child_settings["width"] = _pct(100)
+                child_settings["width_mobile"] = _pct(100)
+        if "tai-card-grid" in settings.get("css_classes", ""):
+            settings["flex_wrap"] = "wrap"
+            for card in descendant.get("elements", []):
+                card["settings"]["width"] = _pct(100 // spec.card_columns)
+                card["settings"]["width_mobile"] = _pct(100)
+
+
+def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem, media: list[dict[str, Any]] | None = None, *, layout: PageLayoutSpec | None = None, live_catalog: bool = False, product_names: list[str] | None = None) -> list[dict[str, Any]]:
     elements: list[dict[str, Any]] = []
     specs = page.section_specs
     if not specs:
@@ -429,12 +471,16 @@ def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem, media: li
             section = section.model_copy(update={"section_type": "hero"})
         renderer = COMPONENTS.get(section_type, simple_content)
         if section_type == "hero":
-            elements.append(hero(section, ds, selected_image))
+            element = hero(section, ds, selected_image)
         elif section_type in {"products", "services", "benefits", "trust", "team", "process", "stats"}:
-            elements.append(cards(section, ds, selected_image, live_catalog=live_catalog,
-                                  product_names=product_names, h1=(index == 0), product_media=media))
+            element = cards(section, ds, selected_image, live_catalog=live_catalog,
+                            product_names=product_names, h1=(index == 0), product_media=media)
         else:
-            elements.append(renderer(section, ds))
+            element = renderer(section, ds)
+        section_spec = section_layout(layout, index)
+        if section_spec is not None:
+            _apply_generative_layout(element, section_spec, page_slug=page.page_slug, index=index)
+        elements.append(element)
     return elements
 
 

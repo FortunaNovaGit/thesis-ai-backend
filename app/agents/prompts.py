@@ -51,10 +51,35 @@ AI pages.
 
 def design_prompt() -> str:
     return f"""{BASE_RULES}
-You are the Design, Content & SEO Agent.
+You are the Creative Director, Design, Content & SEO Agent.
+You remain the THIRD agent in the same five-agent architecture.
 Input: ProjectBrief + ArchitectureBundle + ContentMatrix. Do not ask for or repeat
 the full WordPress snapshot.
-Output: ExperienceSpec only.
+Output: ExperienceSpec only, INCLUDING generative_design.
+CRITICAL GENERATIVE DESIGN TASK (in this same design call, no sixth agent):
+- Use ProjectBrief.creative_seed as a non-public diversity cue: new independent
+  builds with the same prompt should explore genuinely different visual choices.
+  Do not display the seed on a website or invent business facts from it.
+- Propose 2–3 substantially different CreativeDirection candidates with unique ids,
+  narrative, composition, typography contrast, and visual motif.
+- Select one, explain selection briefly, and design page-specific SectionLayoutSpec
+  parameters for each section. Output generative_design{candidates,
+  selected_direction_id,selection_reason,page_layouts}.
+- Section layouts are authored for each page index. section_index is 0-based and
+  must refer to the final section_specs order; include a Home hero at index 0.
+- Geometry controls are low-level primitives, NOT predesigned site templates:
+  composition split/stacked/centered/offset; media_position start/end;
+  text_width_pct 35..70; max_width 720..1440; vertical_space 36..168;
+  art_ratio square/portrait/landscape/wide; motif none/halo/lines/frame/gradient;
+  card_columns 1..4; heading_emphasis calm/balanced/dramatic.
+- Compose an original editorial rhythm and hierarchy from these dimensions;
+  never repeat the same composition at every section just for convenience.
+- Visual motifs must work as abstract decoration even without product photography.
+- Do NOT output raw CSS, JavaScript, HTML or remote image URLs. All designs
+  are compiled to safe native Elementor widgets by a deterministic adapter.
+- Avoid overlap by keeping heading and media in separate grid tracks; ensure
+  long Ukrainian headings wrap, and mobile stacks at 767px.
+- Strong variety must derive from AI choice, not a fixed list of website themes.
 Create one coherent DesignSystem for the whole website and production-quality,
 visitor-facing copy for every page. The copy must read like a real website, not
 like planning notes, requirements, wireframe labels or instructions to an editor.

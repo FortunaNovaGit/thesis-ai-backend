@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class AgentRole(str, Enum):
@@ -77,6 +77,8 @@ class ProjectBrief(BaseModel):
     site_type: str
     language: str = "uk"
     primary_goal: str
+    # Server-injected per-build creative diversity cue, not visitor-facing copy.
+    creative_seed: str = ""
     secondary_goals: list[str] = Field(default_factory=list)
     audiences: list[str] = Field(default_factory=list)
     tone: str = "professional"
@@ -222,11 +224,59 @@ class DesignSystem(BaseModel):
     radius: int = 18
 
 
+class CreativeDirection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    """One proposed original direction; NOT a pre-authored website template."""
+    id: str = Field(min_length=2, max_length=40, pattern=r"^[a-z][a-z0-9_-]*$")
+    name: str = Field(min_length=4, max_length=100)
+    narrative: str = Field(min_length=20, max_length=500)
+    composition: str = Field(min_length=12, max_length=300)
+    typographic_contrast: str = Field(min_length=8, max_length=200)
+    visual_motif: str = Field(min_length=8, max_length=200)
+
+
+class SectionLayoutSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    """Bounded Elementor-native geometry, not arbitrary HTML/CSS/JS."""
+    section_index: int = Field(ge=0, le=30)
+    composition: Literal["split", "stacked", "centered", "offset"] = "split"
+    media_position: Literal["start", "end"] = "end"
+    text_width_pct: int = Field(default=55, ge=35, le=70)
+    max_width: int = Field(default=1200, ge=720, le=1440)
+    vertical_space: int = Field(default=88, ge=36, le=168)
+    art_ratio: Literal["square", "portrait", "landscape", "wide"] = "portrait"
+    motif: Literal["none", "halo", "lines", "frame", "gradient"] = "none"
+    card_columns: int = Field(default=3, ge=1, le=4)
+    heading_emphasis: Literal["calm", "balanced", "dramatic"] = "balanced"
+
+
+class PageLayoutSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    page_slug: str = Field(min_length=1, max_length=80, pattern=r"^[a-z0-9_-]+$")
+    sections: list[SectionLayoutSpec] = Field(min_length=1, max_length=30)
+
+
+class GenerativeDesignSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    """Produced by the existing Creative Director (third agent), no sixth agent."""
+    candidates: list[CreativeDirection] = Field(min_length=2, max_length=3)
+    selected_direction_id: str
+    selection_reason: str = Field(min_length=12, max_length=500)
+    page_layouts: list[PageLayoutSpec] = Field(min_length=1, max_length=15)
+
+    def selected(self) -> CreativeDirection:
+        ids = [x.id for x in self.candidates]
+        if len(set(ids)) != len(ids) or self.selected_direction_id not in ids:
+            raise ValueError("Creative direction IDs must be unique and selected ID must exist")
+        return next(item for item in self.candidates if item.id == self.selected_direction_id)
+
+
 class ExperienceSpec(BaseModel):
     design_direction: str
     design_system: DesignSystem = Field(default_factory=DesignSystem)
     component_rules: list[str] = Field(default_factory=list)
     pages: list[PageExperienceSpec]
+    generative_design: GenerativeDesignSpec | None = None
 
 
 class BuildAction(BaseModel):
