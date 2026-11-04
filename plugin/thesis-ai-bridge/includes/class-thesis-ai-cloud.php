@@ -102,6 +102,7 @@ final class Thesis_AI_Cloud {
         $clean = [
             'prompt' => sanitize_textarea_field((string)($state['prompt'] ?? '')),
             'renderer' => in_array((string)($state['renderer'] ?? 'elementor'), ['elementor', 'gutenberg', 'auto'], true) ? (string)$state['renderer'] : 'elementor',
+            'brief' => array_filter((array)($state['brief'] ?? []), static fn($v) => is_scalar($v)),
             'allow_approved_plugins' => !empty($state['allow_approved_plugins']),
             'allow_site_setup' => !empty($state['allow_site_setup']),
             'updated_at' => gmdate('c'),

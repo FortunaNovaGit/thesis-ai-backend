@@ -25,6 +25,11 @@ facts. Do not design pages, choose plugin slugs, write page copy or plan low-lev
 WordPress actions. Normalize the request so downstream agents do not need the
 original prompt history.
 Keep the artifact small and factual.
+If the request includes [Уточнені параметри від власника сайту], treat it as
+explicit user-supplied constraints. "Очікувана кількість товарів" means planned
+catalogue scale, NOT permission to fabricate entries. Do not add extra pages
+when the owner gave an exact page list. Distinguish user-known facts from
+unknown commercial details and collect those as missing_facts.
 {render_skill_context(AgentRole.ORCHESTRATOR)}
 """
 
@@ -42,6 +47,9 @@ ecommerce, structured_content, seo_plugin.
 Do not invent synonyms such as core_pages, wordpress_pages or contact_forms.
 DO NOT choose plugin slugs. A deterministic capability resolver maps capabilities
 to WordPress Core/Bridge or approved dependencies after you finish.
+Honor the owner's exact page list and brand audience before proposing new
+pages; only build capabilities actually needed. A real contact form requires
+forms capability AND a booking/form section, not just a decorative contact card.
 Every page must have a clear purpose, search intent, primary CTA, section goals,
 and internal links that make the website work as one system rather than unrelated
 AI pages.
@@ -89,6 +97,12 @@ Editorial standards:
 - Never show admin/editor instructions, debugging terms or design rationale
   to visitors. SEO text must help searchers and avoid overclaiming.
 - Use headlines_already_used to avoid site-wide duplication.
+- A navigation label like "Головна", "Магазин", or "Контакти" is NEVER a section
+  headline. Write an informative editorial headline grounded in that section's role.
+- Do not repeat the same headline or body anywhere on the page or across pages.
+  Differentiation must be semantic, not a synonym swap or added section number.
+- NEVER emit a section lacking useful information merely to fill the requested count;
+  if the inputs lack facts, write decision-useful guidance without inventing claims.
 - Build a distinctive editorial rhythm; select split/offset/centered/stacked
   and bento/list/grid ONLY when they fit the actual section content. Large
   typography and negative space beat invented product photographs.

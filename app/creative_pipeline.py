@@ -83,7 +83,41 @@ class CreativePage(BaseModel):
     def ensure_primary_heading(self) -> "CreativePage":
         if self.sections[0].kind != "hero":
             raise ValueError("first section must have kind=hero and its headline is the page H1")
+        from .content_quality import canonical, too_similar, looks_like_planning, safe_cta_url
+        headlines: set[str] = set()
+        bodies: list[str] = []
+        page_labels = {"головна", "магазин", "контакти", "home", "shop", "contact", "about", "про нас"}
+        for index, section in enumerate(self.sections):
+            key = canonical(section.headline)
+            if key in headlines:
+                raise ValueError(f"duplicate headline in section {index}: {section.headline!r}; write a specific different headline")
+            if key in page_labels:
+                raise ValueError(f"section {index} uses a generic navigation label as headline: {section.headline!r}")
+            if section.cta_label and not safe_cta_url(section.cta_url):
+                raise ValueError(f"section {index} has an unsafe or missing CTA destination")
+            if looks_like_planning(section.headline) or looks_like_planning(section.body):
+                raise ValueError(f"section {index} includes editor/planning copy")
+            if any(too_similar(section.body, previous) for previous in bodies):
+                raise ValueError(f"section {index} repeats body text; give it a distinct visitor purpose")
+            headlines.add(key)
+            bodies.append(section.body)
         return self
+
+
+def page_copy_conflicts(page: CreativePage, earlier: list[CreativePage]) -> list[str]:
+    """Actionable cross-page editorial conflicts; no generic replacement copy."""
+    from .content_quality import canonical, too_similar
+    previous = [(other.page_slug, section)
+                for other in earlier for section in other.sections]
+    conflicts: list[str] = []
+    for index, section in enumerate(page.sections):
+        heading = canonical(section.headline)
+        for slug, old in previous:
+            if heading and heading == canonical(old.headline):
+                conflicts.append(f"section[{index}] repeats headline {section.headline!r} from {slug}")
+            if too_similar(section.body, old.body):
+                conflicts.append(f"section[{index}] repeats body from {slug}; write a page-specific paragraph")
+    return conflicts
 
 
 def compose_experience(
@@ -100,6 +134,11 @@ def compose_experience(
     got = [page.page_slug for page in generated_pages]
     if got != expected or len(set(got)) != len(got):
         raise ValueError(f"Creative page coverage mismatch: expected {expected}, received {got}")
+
+    for index, source in enumerate(generated_pages):
+        conflicts = page_copy_conflicts(source, generated_pages[:index])
+        if conflicts:
+            raise ValueError(f"Creative page {source.page_slug} has repeated site copy: " + "; ".join(conflicts[:6]))
 
     pages: list[PageExperienceSpec] = []
     layouts: list[PageLayoutSpec] = []
@@ -165,6 +204,7 @@ def compose_experience(
         layouts.append(PageLayoutSpec(page_slug=intent.slug, sections=layout_sections))
 
     return ExperienceSpec(
+        generation_contract="creative_page_v093",
         design_direction=foundation.design_direction,
         design_system=foundation.design_system,
         pages=pages,

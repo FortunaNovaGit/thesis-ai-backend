@@ -125,11 +125,67 @@ final class Thesis_AI_Bridge_Admin {
         self::redirect_with_result('check', $result);
     }
 
+    /** Optional facts complement a free prompt; they never authorize invented claims. */
+    private static function collect_optional_brief(array $input): array {
+        $fields = [
+            'brand' => 100, 'site_type' => 100, 'audience' => 160,
+            'pages' => 220, 'style' => 160, 'facts' => 480,
+        ];
+        $brief = [];
+        foreach ($fields as $key => $limit) {
+            $raw = isset($input['brief_' . $key]) && is_scalar($input['brief_' . $key])
+                ? (string)wp_unslash((string)$input['brief_' . $key]) : '';
+            $value = sanitize_text_field($raw);
+            $brief[$key] = function_exists('mb_substr') ? mb_substr($value, 0, $limit) : substr($value, 0, $limit);
+        }
+        $raw_count = isset($input['brief_product_count']) && is_scalar($input['brief_product_count'])
+            ? trim((string)wp_unslash((string)$input['brief_product_count'])) : '';
+        $brief['product_count'] = $raw_count !== '' && preg_match('/^\d{1,4}$/', $raw_count)
+            ? (string)min(1000, (int)$raw_count) : '';
+        $raw_colors = isset($input['brief_colors']) && is_scalar($input['brief_colors'])
+            ? (string)wp_unslash((string)$input['brief_colors']) : '';
+        $brief['colors'] = preg_match('/^#[A-Fa-f0-9]{6}(\s*,\s*#[A-Fa-f0-9]{6}){0,3}$/', trim($raw_colors))
+            ? trim($raw_colors) : '';
+        $assets = isset($input['brief_assets']) && is_scalar($input['brief_assets'])
+            ? sanitize_key(wp_unslash((string)$input['brief_assets'])) : '';
+        $brief['assets'] = in_array($assets, ['existing', 'none', 'unsure'], true) ? $assets : 'unsure';
+        return $brief;
+    }
+
+    private static function enrich_prompt(string $prompt, array $brief): string {
+        $labels = [
+            'brand' => 'Назва бренду', 'site_type' => 'Тип сайту',
+            'audience' => 'Цільова аудиторія', 'pages' => 'Бажані сторінки',
+            'product_count' => 'Очікувана кількість товарів у каталозі',
+            'style' => 'Дизайн-побажання (AI сам проєктує структуру)',
+            'colors' => 'Брендові кольори HEX',
+            'facts' => 'ПІДТВЕРДЖЕНІ факти для відвідувачів',
+        ];
+        $lines = [];
+        foreach ($labels as $key => $label) {
+            if (!empty($brief[$key])) { $lines[] = $label . ': ' . $brief[$key]; }
+        }
+        if (($brief['assets'] ?? 'unsure') === 'none') {
+            $lines[] = 'Власних фотографій немає. Не видавай абстрактну графіку за фото реального товару.';
+        } elseif (($brief['assets'] ?? 'unsure') === 'existing') {
+            $lines[] = 'Є власні медіа у бібліотеці WordPress: використовуй тільки придатні зображення.';
+        }
+        if (!$lines) { return $prompt; }
+        $lines[] = 'Кількість товарів — планована місткість каталогу, не дозвіл вигадати товари, склад, ціни, залишки чи фото.';
+        return trim($prompt) . "\n\n[Уточнені параметри від власника сайту]\n" . implode("\n", $lines);
+    }
+
     public static function build(): void {
         self::require_admin('thesis_ai_build');
         $prompt = isset($_POST['website_prompt']) ? sanitize_textarea_field(wp_unslash((string)$_POST['website_prompt'])) : '';
         $renderer = isset($_POST['renderer']) ? sanitize_key(wp_unslash((string)$_POST['renderer'])) : 'elementor';
         $renderer = in_array($renderer, ['elementor', 'gutenberg', 'auto'], true) ? $renderer : 'elementor';
+        $brief = self::collect_optional_brief($_POST);
+        $full_prompt = self::enrich_prompt($prompt, $brief);
+        if ((function_exists('mb_strlen') ? mb_strlen($full_prompt) : strlen($full_prompt)) > 6000) {
+            self::redirect_with_result('build', new WP_Error('thesis_ai_brief_long', __('Опис і додаткові параметри перевищують 6000 символів. Скоротіть текст перед запуском.', 'thesis-ai-bridge')));
+            return;
+        }
         $allow_plugins = !empty($_POST['allow_approved_plugins']);
         $allow_setup = !empty($_POST['allow_site_setup']);
 
@@ -139,11 +195,12 @@ final class Thesis_AI_Bridge_Admin {
         update_option(self::OPTION_SETTINGS, Thesis_AI_Bridge::sanitize_settings($settings), false);
         Thesis_AI_Cloud::save_ui_state([
             'prompt' => $prompt,
+            'brief' => $brief,
             'renderer' => $renderer,
             'allow_approved_plugins' => $allow_plugins,
             'allow_site_setup' => $allow_setup,
         ]);
-        $result = Thesis_AI_Cloud::start_build($prompt, $renderer);
+        $result = Thesis_AI_Cloud::start_build($full_prompt, $renderer);
         self::redirect_with_result('build', $result);
     }
 
@@ -177,6 +234,7 @@ final class Thesis_AI_Bridge_Admin {
         check_ajax_referer('thesis_ai_save_ui_state', 'nonce');
         $state = Thesis_AI_Cloud::save_ui_state([
             'prompt' => isset($_POST['prompt']) ? wp_unslash((string)$_POST['prompt']) : '',
+            'brief' => self::collect_optional_brief($_POST),
             'renderer' => isset($_POST['renderer']) ? sanitize_key(wp_unslash((string)$_POST['renderer'])) : 'elementor',
             'allow_approved_plugins' => !empty($_POST['allow_approved_plugins']),
             'allow_site_setup' => !empty($_POST['allow_site_setup']),
@@ -230,7 +288,9 @@ final class Thesis_AI_Bridge_Admin {
         $backend_url = (string)get_option(self::OPTION_BACKEND_URL, defined('THESIS_AI_CLOUD_URL') ? (string)THESIS_AI_CLOUD_URL : '');
         $message = isset($_GET['thesis_ai_message']) ? sanitize_text_field(wp_unslash((string)$_GET['thesis_ai_message'])) : '';
         $error = isset($_GET['thesis_ai_error']) ? sanitize_text_field(wp_unslash((string)$_GET['thesis_ai_error'])) : '';
-        $prompt = (string)($active_build['prompt'] ?? ($ui_state['prompt'] ?? ''));
+        // Keep the free-form text separate from appended structured constraints.
+        $prompt = (string)($ui_state['prompt'] ?? ($active_build['prompt'] ?? ''));
+        $brief = (array)($ui_state['brief'] ?? []);
         $renderer = (string)($active_build['renderer'] ?? ($ui_state['renderer'] ?? 'elementor'));
         $allow_plugins = array_key_exists('allow_approved_plugins', $ui_state) ? !empty($ui_state['allow_approved_plugins']) : !empty($settings['plugin_management_enabled']);
         $allow_setup = array_key_exists('allow_site_setup', $ui_state) ? !empty($ui_state['allow_site_setup']) : !empty($settings['site_settings_enabled']);
@@ -287,6 +347,24 @@ final class Thesis_AI_Bridge_Admin {
                             <textarea id="thesis-ai-prompt" name="website_prompt" maxlength="6000" placeholder="Наприклад: Створи сучасний сайт стоматологічної клініки українською. Потрібні Головна, Послуги, Лікарі, Про нас, Контакти та форма запису. Світлий дизайн, сині акценти, SEO." required><?php echo esc_textarea($prompt); ?></textarea>
                             <span id="thesis-ai-prompt-count" class="tai-counter"><?php echo esc_html((string)self::text_length($prompt)); ?>/6000</span>
                         </div>
+                        <details class="tai-brief-panel" id="tai-brief-panel" <?php echo array_filter($brief, static fn($v) => (string)$v !== '' && (string)$v !== 'unsure') ? 'open' : ''; ?>>
+                            <summary><span class="dashicons dashicons-admin-settings"></span><strong>Уточнити результат</strong><small>Необов'язково · більше конкретики — менше здогадів</small></summary>
+                            <div class="tai-brief-body">
+                                <p class="tai-brief-intro">Промпту достатньо для старту. Заповнюйте лише те, що знаєте: AI сам створить композицію, але не повинен вигадувати факти про бізнес.</p>
+                                <div class="tai-brief-grid">
+                                    <label><span>Бренд</span><input type="text" name="brief_brand" maxlength="100" placeholder="Наприклад, Fortuna Nova" value="<?php echo esc_attr((string)($brief['brand'] ?? '')); ?>"></label>
+                                    <label><span>Тип сайту</span><input type="text" name="brief_site_type" maxlength="100" placeholder="Магазин, портфоліо, послуги…" value="<?php echo esc_attr((string)($brief['site_type'] ?? '')); ?>"></label>
+                                    <label><span>Цільова аудиторія</span><input type="text" name="brief_audience" maxlength="160" placeholder="Кому і для чого потрібен сайт" value="<?php echo esc_attr((string)($brief['audience'] ?? '')); ?>"></label>
+                                    <label><span>Потрібні сторінки</span><input type="text" name="brief_pages" maxlength="220" placeholder="Головна, Магазин, Контакти" value="<?php echo esc_attr((string)($brief['pages'] ?? '')); ?>"></label>
+                                    <label><span>Кількість товарів у майбутньому каталозі</span><input type="number" name="brief_product_count" min="0" max="1000" placeholder="Наприклад, 24" value="<?php echo esc_attr((string)($brief['product_count'] ?? '')); ?>"></label>
+                                    <label><span>Власні зображення</span><select name="brief_assets"><option value="unsure" <?php selected((string)($brief['assets'] ?? 'unsure'), 'unsure'); ?>>Ще не визначено</option><option value="existing" <?php selected((string)($brief['assets'] ?? ''), 'existing'); ?>>Є в медіабібліотеці WordPress</option><option value="none" <?php selected((string)($brief['assets'] ?? ''), 'none'); ?>>Поки немає</option></select></label>
+                                    <label><span>Візуальний характер</span><input type="text" name="brief_style" maxlength="160" placeholder="AI обирає сам або коротка творча підказка" value="<?php echo esc_attr((string)($brief['style'] ?? '')); ?>"></label>
+                                    <label><span>Брендові кольори, за бажанням</span><input type="text" name="brief_colors" pattern="#[0-9a-fA-F]{6}(,\s*#[0-9a-fA-F]{6}){0,3}" placeholder="#35221D, #EACD9B" value="<?php echo esc_attr((string)($brief['colors'] ?? '')); ?>"><small>HEX, до чотирьох кольорів. Без заповнення палітру обирає AI.</small></label>
+                                    <label class="tai-brief-wide"><span>Лише підтверджені факти</span><textarea name="brief_facts" rows="3" maxlength="480" placeholder="Наприклад, назви реальних товарів, підтверджені особливості виробництва, адреса — тільки якщо достовірно відома"><?php echo esc_textarea((string)($brief['facts'] ?? '')); ?></textarea></label>
+                                </div>
+                                <div class="tai-brief-note"><span class="dashicons dashicons-info-outline"></span><span>Це не імпорт каталогу: поточний WooCommerce Builder може створювати лише обмежену кількість демо-чернеток за явними назвами. Фото товарів, ціни, склад та залишки треба підтвердити окремо. Сторінки залишаються Draft.</span></div>
+                            </div>
+                        </details>
                         <?php if ($connected) : ?>
                             <div class="tai-build-options">
                                 <label class="tai-field"><span><?php echo esc_html__('Конструктор сторінок', 'thesis-ai-bridge'); ?></span><select id="thesis-ai-renderer" name="renderer"><option value="elementor" <?php selected($renderer, 'elementor'); ?>>Elementor Free</option><option value="gutenberg" <?php selected($renderer, 'gutenberg'); ?>>Gutenberg</option><option value="auto" <?php selected($renderer, 'auto'); ?>>Auto</option></select></label>
@@ -441,6 +519,9 @@ final class Thesis_AI_Bridge_Admin {
                 echo '<div><span>✓</span><strong>' . esc_html($title) . '</strong>' . ($edit_url !== '' ? '<a href="' . esc_url($edit_url) . '">' . esc_html__('Редагувати', 'thesis-ai-bridge') . '</a>' : '') . '</div>';
             }
             echo '</div>';
+        }
+        if ($passed && $pages) {
+            echo '<div class="tai-review-next"><strong>Перед публікацією перевірте</strong><ul><li>Сторінки у редакторі Elementor і на телефоні: заголовки, відступи, посилання</li><li>Реальні зображення, ціни, характеристики, алергени та контакти</li><li>WooCommerce: каталог, кошик, доставка й оплата — якщо потрібні</li></ul><small>Успішний backend QA не означає, що фактичний дизайн пройшов Playwright або отримав незалежну оцінку.</small></div>';
         }
         if ($passed && empty($build['published_at']) && $pages) {
             echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" class="tai-publish-form" onsubmit="return confirm(\'' . esc_js(__('Опублікувати всі AI-generated draft-сторінки?', 'thesis-ai-bridge')) . '\');"><input type="hidden" name="action" value="thesis_ai_publish_build">';

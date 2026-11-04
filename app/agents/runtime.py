@@ -431,10 +431,21 @@ def reconcile_experience(
     for page in architecture.pages:
         existing = exp_by_slug.get(page.slug) or exp_by_name.get(page.name)
         matrix = matrix_by_slug.get(page.slug)
-        required_types = list(dict.fromkeys(page.section_goals or ["hero", "content", "cta"]))
+        # A successfully compiled CreativePage is authoritative about its content
+        # and order. The older reconciler formerly re-created mandatory sections
+        # from generic fallbacks, generating repeated "Головна/Магазин/Контакти"
+        # headlines and unrelated bodies before the editorial gate.
+        creative_authored = bool(
+            experience.generation_contract == "creative_page_v093" and existing is not None
+            and existing.section_specs
+        )
+        required_types = (
+            [s.section_type for s in existing.section_specs]
+            if creative_authored else list(dict.fromkeys(page.section_goals or ["hero", "content", "cta"]))
+        )
         # The designer can add up to two meaningful editorial components; previously
         # every new type was silently discarded, producing repetitive templates.
-        if existing is not None:
+        if existing is not None and not creative_authored:
             optional = {"faq", "process", "benefits", "trust", "products", "services", "content"}
             for proposed in existing.section_specs:
                 kind = proposed.section_type.strip().lower()
@@ -463,17 +474,18 @@ def reconcile_experience(
             # Preserve the Creative Director's authored copy. Duplicates are
             # repaired by the dedicated editorial pass, not replaced here by
             # a generic per-section fallback (which caused repeated templates).
-            if not heading or _looks_internal_copy(heading):
-                heading = fallback.heading
-            if not body or _looks_internal_copy(body) or looks_like_planning(body):
-                body = fallback.body
+            if not creative_authored:
+                if not heading or _looks_internal_copy(heading):
+                    heading = fallback.heading
+                if not body or _looks_internal_copy(body) or looks_like_planning(body):
+                    body = fallback.body
             # Do not overwrite specific, concise, visitor-facing sentences
             # only because they are shorter than a hardcoded threshold. Exact
             # and near-duplicate bodies are checked by the editorial gate.
             # A fallback must not copy generic planning text into another section.
             # Repair an *actual* repeated paragraph only. Do not replace
             # concise, original content with generic marketing copy.
-            if any(too_similar(body, prev) for prev in [*used_bodies, *global_bodies]):
+            if not creative_authored and any(too_similar(body, prev) for prev in [*used_bodies, *global_bodies]):
                 replacement_body = fallback.body
                 if replacement_body and not any(too_similar(replacement_body, prev)
                                                 for prev in [*used_bodies, *global_bodies]):
@@ -484,17 +496,17 @@ def reconcile_experience(
             items = list(dict.fromkeys(
                 x.strip() for x in sec.items if str(x).strip() and not looks_like_planning(str(x))
             ))
-            if section_type in {"services", "benefits", "trust", "team", "process", "stats", "faq"} and len(items) < 3:
+            if not creative_authored and section_type in {"services", "benefits", "trust", "team", "process", "stats", "faq"} and len(items) < 3:
                 items = list(dict.fromkeys([*items, *fallback.items]))[:6]
-            if section_type in {"hero", "contact"} and not items and fallback.items:
+            if not creative_authored and section_type in {"hero", "contact"} and not items and fallback.items:
                 items = fallback.items[:3]
 
             cta_label = sec.cta_label
             cta_url = sec.cta_url
-            if section_type in {"hero", "cta"} and not cta_label:
+            if not creative_authored and section_type in {"hero", "cta"} and not cta_label:
                 cta_label = fallback.cta_label
                 cta_url = fallback.cta_url
-            if cta_label and not safe_cta_url(cta_url):
+            if not creative_authored and cta_label and not safe_cta_url(cta_url):
                 cta_url = fallback.cta_url if safe_cta_url(fallback.cta_url) else "/"
 
             component_key = sec.component_key or fallback.component_key
@@ -503,7 +515,7 @@ def reconcile_experience(
                 "section_type": section_type,
                 "component_key": component_key,
                 "section_goal": sec.section_goal or fallback.section_goal,
-                "eyebrow": sec.eyebrow or fallback.eyebrow,
+                "eyebrow": sec.eyebrow if creative_authored else (sec.eyebrow or fallback.eyebrow),
                 "heading": heading,
                 "body": body,
                 "items": items,
@@ -728,7 +740,9 @@ def compile_build_plan(
             continue
         # Ensure the home page of an ecommerce site always contains a concrete
         # visual product/collection showcase, even if the LLM omits it.
-        if ecommerce_requested and page.slug == "home" and not any(sec.section_type == "products" for sec in exp.section_specs):
+        if (ecommerce_requested and page.slug == "home"
+            and experience_spec.generation_contract != "creative_page_v093"
+            and not any(sec.section_type == "products" for sec in exp.section_specs)):
             sample_section = SectionContentSpec(
                 section_type="products", component_key="product_showcase_v3",
                 heading="Обрані колекції", eyebrow="КОЛЕКЦІЯ",
@@ -1193,6 +1207,32 @@ class OpenAIAgentRuntime(AgentRuntime):
             }, CreativePage)
             if page.page_slug != intent.slug:
                 raise ValueError(f"Creative Director returned slug {page.page_slug!r} for expected page {intent.slug!r}")
+            from ..creative_pipeline import page_copy_conflicts
+            conflicts = page_copy_conflicts(page, produced)
+            if conflicts:
+                # One *page-local* editorial rewrite, not a costly site-wide rebuild.
+                # The quality gate remains fail-closed if the rewrite is still weak.
+                if self.budget.state().remaining_calls < 1:
+                    raise RuntimeError(
+                        f"Creative page {intent.slug} repeats previous page copy, "
+                        "but the LLM call budget is exhausted: " + "; ".join(conflicts[:3])
+                    )
+                page = await self._run_typed("design", {
+                    "task": "creative_page_content_and_layout_only",
+                    "page": intent.model_dump(mode="json"),
+                    "site_title": architecture.site_title,
+                    "language": brief.language,
+                    "verified_facts": brief.known_facts,
+                    "missing_facts": brief.missing_facts,
+                    "design_system": foundation.design_system.model_dump(mode="json"),
+                    "previous_headlines": used_headings[-40:],
+                    "rejected_page": page.model_dump(mode="json"),
+                    "editorial_failures": conflicts[:8],
+                    "instruction": "Rewrite ONLY the supplied page with entirely distinct, substantive, visitor-facing headings and paragraphs. Preserve semantic section kinds and native Elementor design controls. No invented facts. Output the exact CreativePage JSON contract.",
+                }, CreativePage)
+                remaining = page_copy_conflicts(page, produced)
+                if remaining or page.page_slug != intent.slug:
+                    raise RuntimeError(f"Creative Director did not resolve cross-page duplication on {intent.slug}: " + "; ".join(remaining[:4]))
             produced.append(page)
             used_headings.extend(section.headline for section in page.sections)
         return compose_experience(architecture, foundation, produced)

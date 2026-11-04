@@ -68,17 +68,17 @@ class EditorialIssue:
 
 def audit_experience(experience: ExperienceSpec) -> list[EditorialIssue]:
     issues: list[EditorialIssue] = []
-    body_history: list[tuple[str, str]] = []
+    body_history: list[tuple[str, int, str]] = []
     site_headings: dict[str, str] = {}
     for page in experience.pages:
         headings: set[str] = set()
         for section_index, section in enumerate(page.section_specs):
             if section.section_type == "hero" and len(canonical(section.body)) < 20:
-                issues.append(EditorialIssue("empty_hero", page.page_slug, "Hero lacks useful introduction"))
+                issues.append(EditorialIssue("empty_hero", page.page_slug, "Hero lacks useful introduction", section_index, section.section_type))
             if not section.body.strip() and not section.items and section.section_type not in {"products", "stats"}:
-                issues.append(EditorialIssue("empty_section", page.page_slug, section.section_type))
+                issues.append(EditorialIssue("empty_section", page.page_slug, section.section_type, section_index, section.section_type))
             if looks_like_planning(section.heading) or looks_like_planning(section.body):
-                issues.append(EditorialIssue("planning_copy", page.page_slug, section.section_type))
+                issues.append(EditorialIssue("planning_copy", page.page_slug, section.section_type, section_index, section.section_type))
             heading = canonical(section.heading)
             if heading and heading in headings:
                 issues.append(EditorialIssue("duplicate_heading", page.page_slug, section.heading, section_index, section.section_type))
@@ -90,22 +90,24 @@ def audit_experience(experience: ExperienceSpec) -> list[EditorialIssue]:
             if heading:
                 site_headings.setdefault(heading, page.page_slug)
             if any(looks_like_planning(item) for item in section.items):
-                issues.append(EditorialIssue("planning_item", page.page_slug, section.section_type))
+                issues.append(EditorialIssue("planning_item", page.page_slug, section.section_type, section_index, section.section_type))
             items_seen: set[str] = set()
             for item in section.items:
                 key = canonical(item)
                 if key and key in items_seen:
-                    issues.append(EditorialIssue("duplicate_item", page.page_slug, section.section_type))
+                    issues.append(EditorialIssue("duplicate_item", page.page_slug, section.section_type, section_index, section.section_type))
                 items_seen.add(key)
             body = section.body.strip()
-            for other_page, other_body in body_history:
+            for other_page, other_index, other_body in body_history:
                 if too_similar(body, other_body):
-                    issues.append(EditorialIssue("repeated_body", page.page_slug, f"Repeated with {other_page}"))
+                    issues.append(EditorialIssue("repeated_body", page.page_slug,
+                                                 f"Repeated with {other_page}:section[{other_index}]",
+                                                 section_index, section.section_type))
                     break
             if body:
-                body_history.append((page.page_slug, body))
+                body_history.append((page.page_slug, section_index, body))
             if section.cta_label and not safe_cta_url(section.cta_url):
-                issues.append(EditorialIssue("unsafe_cta", page.page_slug, section.section_type))
+                issues.append(EditorialIssue("unsafe_cta", page.page_slug, section.section_type, section_index, section.section_type))
         if page.seo.h1 and looks_like_planning(page.seo.h1):
             issues.append(EditorialIssue("planning_h1", page.page_slug, "SEO H1"))
         if looks_like_planning(page.seo.meta_description):

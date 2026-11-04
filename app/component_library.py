@@ -505,6 +505,11 @@ def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem, media: li
         else:
             element = renderer(section, ds)
         section_spec = section_layout(layout, index)
+        if (section_spec is not None and section_type == "hero" and selected_image is None
+            and section_spec.visual_treatment == "media"):
+            # Never pretend that an empty graphic block is a real product photo.
+            # Typography-first native Elementor widgets are the truthful fallback.
+            section_spec = section_spec.model_copy(update={"visual_treatment": "typography"})
         if section_spec is not None:
             _apply_generative_layout(element, section_spec, page_slug=page.page_slug, index=index)
         elements.append(element)

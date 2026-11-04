@@ -131,7 +131,12 @@ class PullPlanningWorkflow:
         creative_brief = brief.model_copy(update={"creative_seed": creative_seed})
         experience: ExperienceSpec = await self.agents.design(creative_brief, architecture)
         experience = reconcile_experience(brief, architecture, experience)
-        experience, editorial_repairs = repair_duplicate_headings(experience)
+        if experience.generation_contract == "creative_page_v093":
+            # A typed CreativePage is authored copy. Never replace the creative
+            # director's headings with generic fallback language here.
+            editorial_repairs = []
+        else:
+            experience, editorial_repairs = repair_duplicate_headings(experience)
         if renderer in {"elementor", "auto"} and self.settings.resolved_agent_mode == "openai":
             # Enforce an actual generative output, not silent fallback to a fixed
             # 0.8.x layout if the Creative Director omits its new contract.

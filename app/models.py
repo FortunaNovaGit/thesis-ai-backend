@@ -284,6 +284,9 @@ class ExperienceSpec(BaseModel):
     component_rules: list[str] = Field(default_factory=list)
     pages: list[PageExperienceSpec]
     generative_design: GenerativeDesignSpec | None = None
+    # Discriminator: older mock/generative artifacts need legacy reconciliation;
+    # page-by-page Creative Director artifacts must never receive canned sections.
+    generation_contract: Literal["creative_page_v093"] | None = None
 
 
 class BuildAction(BaseModel):

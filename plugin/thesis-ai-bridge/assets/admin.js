@@ -11,6 +11,7 @@
   const allowPlugins = $('#thesis-ai-allow-plugins');
   const allowSetup = $('#thesis-ai-allow-setup');
   const count = $('#thesis-ai-prompt-count');
+  const briefFields = $$('[name^="brief_"]');
   const autosave = $('#thesis-ai-autosave');
   const errorBox = $('#thesis-ai-build-error');
   const preflightBtn = $('#thesis-ai-preflight');
@@ -37,6 +38,7 @@
         const json=await post({
           action:'thesis_ai_save_ui_state',nonce:ThesisAIAdmin.uiNonce,
           prompt:prompt.value,renderer:renderer.value,
+          ...Object.fromEntries(briefFields.map(el=>[el.name,el.value])),
           allow_approved_plugins:allowPlugins&&allowPlugins.checked?'1':'',
           allow_site_setup:allowSetup&&allowSetup.checked?'1':''
         });
@@ -44,7 +46,7 @@
       }catch(e){ if(autosave){autosave.textContent='Чернетка зберігається при запуску';autosave.className='tai-autosave';} }
     },700);
   }
-  [prompt,renderer,allowPlugins,allowSetup].filter(Boolean).forEach(el=>el.addEventListener(el===prompt?'input':'change',scheduleSave));
+  [prompt,renderer,allowPlugins,allowSetup,...briefFields].filter(Boolean).forEach(el=>el.addEventListener(el===prompt || el.tagName==='INPUT' || el.tagName==='TEXTAREA'?'input':'change',scheduleSave));
   updateCounter();
 
   const stageToStep = stage => {

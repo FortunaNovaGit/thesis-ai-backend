@@ -363,7 +363,8 @@ class MultiAgentWorkflow:
         # Same bounded heading deduplication as WordPress Pull. Legacy local
         # workflow should not regress when a required product section is added.
         from .editorial_repair import repair_duplicate_headings
-        run.experience_spec, _ = repair_duplicate_headings(run.experience_spec)
+        if run.experience_spec.generation_contract != "creative_page_v093":
+            run.experience_spec, _ = repair_duplicate_headings(run.experience_spec)
         run.status = "specified"
 
         baseline = compile_build_plan(run.application_spec, run.experience_spec, run.site_snapshot, renderer)
