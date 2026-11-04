@@ -124,6 +124,7 @@ final class Thesis_AI_Cloud {
             'pages' => count((array)($snapshot['pages'] ?? [])),
             'plugins' => count((array)($snapshot['plugins'] ?? [])),
             'themes' => count((array)($snapshot['themes'] ?? [])),
+            'image_count' => count((array)($snapshot['media'] ?? [])),
             'active_theme' => (string)(($snapshot['structure']['active_theme'] ?? '') ?: ($snapshot['site']['theme'] ?? '')),
             'elementor_active' => false,
             'woocommerce_active' => false,

@@ -42,7 +42,7 @@ def test_woocommerce_shop_page_remains_wc_owned_and_no_collision():
 def test_opt_in_placeholder_products_and_no_unrequested_fake_inventory():
     assert safe_demo_products('Створи магазин шоколаду') == []
     names = safe_demo_products('Додай демонстраційні товари для WooCommerce магазину')
-    assert len(names) == 3 and all('Демо-товар' in n for n in names)
+    assert names == []  # v0.9.4: never fabricate demo product records
     assert safe_demo_products('Зроби магазин і додай «Асорті 16 цукерок»') == ['Асорті 16 цукерок']
 
 
@@ -63,7 +63,8 @@ def test_hero_does_not_reuse_internal_planning_notes_in_visual_panel():
     nodes=compile_elementor_page(p, DesignSystem())
     titles=[str(n.get('settings',{}).get('title','')) for n in walk(nodes)]
     assert not any('посадкова' in title or 'конверсії' in title for title in titles)
-    assert any('tai-hero-art' in str(n.get('settings',{}).get('css_classes','')) for n in walk(nodes))
+    # v0.9.4: no decorative fake-photo slots when image metadata is absent.
+    assert not any('tai-hero-art' in str(n.get('settings',{}).get('css_classes','')) for n in walk(nodes))
 
 
 def test_ecommerce_home_adds_visual_product_showcase_even_when_agent_omits_it():

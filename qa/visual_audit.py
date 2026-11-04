@@ -58,17 +58,39 @@ async def inspect(url: str, output: pathlib.Path, storage_state: str | None = No
                 const badImages=all.filter(i=>i.getClientRects().length && (i.complete && i.naturalWidth===0));
                 const noAlt=all.filter(i=>i.getClientRects().length && !i.hasAttribute('alt'));
                 const buttons=[...document.querySelectorAll('a.elementor-button,button')].filter(x=>x.getClientRects().length);
+                const aiSite=document.body.classList.contains('thesis-ai-generated');
+                const sections=[...document.querySelectorAll('.elementor .thesis-ai-section')].filter(x=>x.getClientRects().length);
+                const bounds=sections.map(x=>{const r=x.getBoundingClientRect();return {x:Math.round(r.x),width:Math.round(r.width)};});
+                const visible=x=>!!x && getComputedStyle(x).display!=='none' && getComputedStyle(x).visibility!=='hidden' && !!x.getClientRects().length;
+                const legacyPlaceholders=[...document.querySelectorAll('.tai-product-art,.tai-hero-art')].filter(visible).length;
+                const themeTitles=[...document.querySelectorAll('.entry-header .entry-title,.page-header .entry-title')].filter(visible).length;
                 return {title:document.title, viewport:window.innerWidth, scrollWidth:d.scrollWidth,
                     h1Count:h1.length, h1Text:h1.map(x=>x.innerText.slice(0,160)),
                     brokenImages:badImages.length, imagesWithoutAlt:noAlt.length,
-                    visibleButtons:buttons.length, smallButtons:buttons.filter(b=>{const r=b.getBoundingClientRect();return r.width<40||r.height<40}).length};
+                    visibleButtons:buttons.length, smallButtons:buttons.filter(b=>{const r=b.getBoundingClientRect();return r.width<40||r.height<40}).length,
+                    aiOwned:aiSite, sectionBounds:bounds, legacyPlaceholderBlocks:legacyPlaceholders,
+                    visibleThemeTitles:themeTitles};
             }""")
             measured["http_status"] = status
             measured["horizontal_overflow"] = measured["scrollWidth"] > measured["viewport"] + 3
             measured["page_errors"] = errors[:10]
+            measured["narrow_sections"] = [b for b in measured["sectionBounds"] if
+                                          b["width"] < measured["viewport"] * .90]
+            measured["offscreen_sections"] = [b for b in measured["sectionBounds"] if
+                                             b["x"] < -3 or b["x"] + b["width"] > measured["viewport"] + 3]
+            measured["visual_defects"] = []
+            if measured["aiOwned"] and measured["narrow_sections"]:
+                measured["visual_defects"].append("narrow_ai_canvas")
+            if measured["aiOwned"] and measured["offscreen_sections"]:
+                measured["visual_defects"].append("offscreen_ai_section")
+            if measured["aiOwned"] and measured["visibleThemeTitles"]:
+                measured["visual_defects"].append("duplicate_theme_page_title")
+            if measured["aiOwned"] and measured["legacyPlaceholderBlocks"]:
+                measured["visual_defects"].append("large_decorative_placeholder")
             measured["passed_dom_smoke"] = (
                 measured["http_status"] == 200 and not measured["horizontal_overflow"]
                 and measured["h1Count"] == 1 and not errors and measured["brokenImages"] == 0
+                and not measured["visual_defects"]
             )
             report["viewports"][label] = measured
             await page.screenshot(path=str(output / f"{label}.png"), full_page=True)

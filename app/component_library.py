@@ -45,6 +45,12 @@ def choose_matching_media(query: str, media: list[dict[str, Any]]) -> dict[str, 
 
 
 def choose_page_media(page: PageExperienceSpec, media: list[dict[str, Any]]) -> dict[str, Any] | None:
+    # An explicitly selected WP attachment is stronger evidence of media intent
+    # than weak AI-text stem matching. This applies only to the homepage.
+    if page.page_slug == "home":
+        for item in media:
+            if item.get("preferred_home_hero") and _validated_media_url(item):
+                return item
     text = " ".join([page.page_name, page.page_goal] +
                     [" ".join([sec.heading, sec.body]) for sec in page.section_specs])
     return choose_matching_media(text, media)
@@ -170,23 +176,33 @@ def _surface_card(title: str, body: str, ds: DesignSystem, *, width: int = 31, v
 
 
 def _editorial_product_card(title: str, body: str, ds: DesignSystem, index: int, *, width: int = 48, media: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Editable editorial sample card; deliberately not a purchasable product."""
-    preview = _container(([_image_widget(media)] if media else [
-        _widget("heading", {"title": f"{index + 1:02d}", "header_size": "div", "title_color": ds.accent,
-                            "typography_typography": "custom", "typography_font_family": ds.heading_font,
-                            "typography_font_size": _px(54)}),
-    ]), {"content_width": "full", "min_height": _px(205), "justify_content": "center",
-        "align_items": "center", "padding": _box(0,0,0,0) if media else _box(20,20,20,20),
-        "css_classes": "tai-product-art-photo" if media else f"tai-product-art tai-product-art-{index % 4}"})
-    elements = [preview, _heading(title, ds.text, ds, level="h3", size=24)]
+    """Editable catalog teaser. No counterfeit photographic or numeric placeholder.
+
+    Without verified attachment, render a compact editorial row instead of a
+    giant fake product-image rectangle. Commercial data still belongs to WC.
+    """
+    elements: list[dict[str, Any]] = []
+    if media:
+        elements.append(_container([_image_widget(media)], {
+            "content_width": "full", "padding": _box(0, 0, 0, 0),
+            "css_classes": "tai-product-art-photo",
+        }))
+    else:
+        # Deliberate text-first preview; do not imply a product image exists.
+        elements.append(_widget("heading", {
+            "title": f"{index + 1:02d} /", "header_size": "div", "title_color": ds.accent,
+            "typography_typography": "custom", "typography_font_family": ds.body_font,
+            "typography_font_size": _px(14), "typography_font_weight": "600",
+        }))
+    elements.append(_heading(title, ds.text, ds, level="h3", size=26))
     if body:
-        elements.append(_text(body, ds.muted, ds, size=15))
+        elements.append(_text(body, ds.muted, ds, size=16))
     return _container(elements, {
         "content_width": "full", "width": _pct(width), "width_mobile": _pct(100),
         "background_background": "classic", "background_color": ds.surface,
-        "padding": _box(16, 16, 24, 16),
+        "padding": _box(16, 16, 24, 16) if media else _box(28, 22, 30, 22),
         "border_radius": _box(ds.radius, ds.radius, ds.radius, ds.radius),
-        "gap": _px(13), "css_classes": "tai-product-card",
+        "gap": _px(13), "css_classes": "tai-product-card " + ("tai-product-card-with-photo" if media else "tai-product-card-text-only"),
     })
 
 
@@ -272,31 +288,31 @@ def hero(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] | 
             "padding": _box(0, 0, 0, 0), "css_classes": "tai-hero-photo",
         })
     else:
-        # Intentional image slot. Only the CSS artwork is decorative; no AI
-        # planning notes or fictitious product photos are ever displayed.
-        right = _container([], {
-            "content_width": "full", "width": _pct(100), "width_mobile": _pct(100),
-            "padding": _box(0, 0, 0, 0), "min_height": _px(410),
-            "css_classes": "tai-hero-art",
-        })
+        # No image supplied: no large empty placeholder in the published draft.
+        # A real photograph can be inserted later with native Elementor Image.
+        right = None
 
-    row = _container([left, right], {
+    row = _container([left] + ([right] if right is not None else []), {
         "content_width": "full",
         "flex_direction": "row", "flex_direction_mobile": "column",
         "align_items": "center", "css_classes": "tai-hero-grid",
         "gap": _px(32), "padding": _box(0, 0, 0, 0),
     })
-    return _section_shell(section, [row], ds)
+    shell = _section_shell(section, [row], ds)
+    if media is None:
+        shell["settings"]["css_classes"] += " tai-visual-typography"
+    return shell
 
 
 def cards(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] | None = None, *, live_catalog: bool = False, product_names: list[str] | None = None, h1: bool = False, product_media: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     body = _intro(section, ds, h1=h1)
     pairs = _split_items(section.items)
-    if section.section_type == "products" and product_names:
-        # Only names explicitly supplied or opt-in placeholder labels. No false offers.
-        # Keep the customer-facing product showcase free of editor instructions.
-        # Admin-only draft metadata lives in WooCommerce, not on the storefront.
-        pairs = [(name, "") for name in product_names[:4]]
+    if section.section_type == "products":
+        # Names typed by the Creative Director are NOT verified product entries.
+        # Only explicit owner-provided items may become teaser cards. Otherwise
+        # show the true WooCommerce catalog (if public products exist) or the
+        # authored introductory copy/CTA without invented card inventory.
+        pairs = [(name, "") for name in (product_names or [])[:4]]
     if section.section_type == "products":
         item_cards = [_editorial_product_card(title, text, ds, i, width=48 if len(pairs) <= 2 else 31,
                        media=choose_matching_media(title, product_media or []))
@@ -510,6 +526,11 @@ def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem, media: li
             # Never pretend that an empty graphic block is a real product photo.
             # Typography-first native Elementor widgets are the truthful fallback.
             section_spec = section_spec.model_copy(update={"visual_treatment": "typography"})
+        if (section_spec is not None and section_type not in {"hero", "products"}
+            and not section.items and section_spec.vertical_space > 110):
+            # A simple heading + paragraph should not occupy a giant blank
+            # full-height panel. This geometric guardrail preserves AI content.
+            section_spec = section_spec.model_copy(update={"vertical_space": 88})
         if section_spec is not None:
             _apply_generative_layout(element, section_spec, page_slug=page.page_slug, index=index)
         elements.append(element)

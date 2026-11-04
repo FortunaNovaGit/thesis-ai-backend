@@ -22,7 +22,7 @@ def sample_page():
 def test_hero_grid_has_unconstrained_children_but_safe_responsive_css():
     components=list(nodes(compile_elementor_page(sample_page(),DesignSystem())))
     grid=next(n for n in components if n.get('settings',{}).get('css_classes')=='tai-hero-grid')
-    assert len(grid['elements']) == 2
+    assert len(grid['elements']) == 1  # No empty hero-art column without media
     assert grid['elements'][0]['settings']['css_classes']=='tai-hero-copy'
     assert all(child['settings']['width']['size']==100 for child in grid['elements'])
     css=Path(__file__).resolve().parents[2]/'plugin'/'thesis-ai-bridge'/'assets'/'front.css'
@@ -37,8 +37,7 @@ def test_hero_no_internal_planning_content_or_fake_product_photo():
     components=list(nodes(compile_elementor_page(sample_page(),DesignSystem())))
     texts=[str(n.get('settings',{}).get('title','')) for n in components]
     assert not any('посадкова' in t or 'конверсії' in t for t in texts)
-    art=next(n for n in components if n.get('settings',{}).get('css_classes')=='tai-hero-art')
-    assert art['elements']==[]
+    assert not any(n.get('settings',{}).get('css_classes')=='tai-hero-art' for n in components)
 
 
 def test_relevant_real_media_can_fill_hero_and_unrelated_cannot():

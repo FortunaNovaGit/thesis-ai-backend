@@ -91,6 +91,17 @@ Editorial standards:
   rather than keyword lists. Don't invent business facts to fill cards.
 - Distinct page intent: Home tells brand story, Shop supports comparison,
   Contacts makes contact easy; do not recycle the same paragraph on all pages.
+- Do NOT use empty marketing filler such as "спокійний вибір без зайвих обіцянок",
+  "формат допомагає зосередитися на виборі", "основа представленого формату".
+  A polished brand story is not vague cautionary copy. Say something concrete
+  about what the visitor can do and what the owner has actually provided.
+- The homepage is a VISUAL sales experience, not a documentation page. Prefer
+  a few genuinely differentiated sections, concise headlines, distinctive
+  typographic hierarchy and product-specific descriptions when verified.
+  If media is absent, choose a strong typography-led concept and do not invent
+  a fake photo, fake collection or "image placeholder". Specify the absence.
+- A page label (Home/Shop/Contacts) must never become a visible editorial headline.
+- Product cards are business records: do not treat CTA quotes as item names.
 - No fabricated prices, stock, years, reviews, certifications, workers,
   product attributes, allergens, phones, addresses, shipping or payment facts.
 - Translate missing data into neutral visitor-safe copy, not promises.

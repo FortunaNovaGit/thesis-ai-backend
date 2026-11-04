@@ -83,7 +83,7 @@ class CreativePage(BaseModel):
     def ensure_primary_heading(self) -> "CreativePage":
         if self.sections[0].kind != "hero":
             raise ValueError("first section must have kind=hero and its headline is the page H1")
-        from .content_quality import canonical, too_similar, looks_like_planning, safe_cta_url
+        from .content_quality import canonical, too_similar, looks_like_planning, looks_like_filler, safe_cta_url
         headlines: set[str] = set()
         bodies: list[str] = []
         page_labels = {"головна", "магазин", "контакти", "home", "shop", "contact", "about", "про нас"}
@@ -97,6 +97,8 @@ class CreativePage(BaseModel):
                 raise ValueError(f"section {index} has an unsafe or missing CTA destination")
             if looks_like_planning(section.headline) or looks_like_planning(section.body):
                 raise ValueError(f"section {index} includes editor/planning copy")
+            if looks_like_filler(section.headline) or looks_like_filler(section.body):
+                raise ValueError(f"section {index} contains generic filler; write useful customer-facing copy")
             if any(too_similar(section.body, previous) for previous in bodies):
                 raise ValueError(f"section {index} repeats body text; give it a distinct visitor purpose")
             headlines.add(key)

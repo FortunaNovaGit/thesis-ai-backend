@@ -44,3 +44,7 @@ The Creative Director role now makes a site-wide `CreativeFoundation` call, foll
 - **Important limitation:** Elementor Free cannot replace WooCommerce's system Shop archive via the standard Elementor Pro archive Theme Builder. The free pipeline styles the native WooCommerce archive separately, and drafts AI-owned pages as editable Elementor V3 containers.
 
 An offline test is not a live OpenAI/Render/EasyWP acceptance run. Never expose secrets or use a live merchant's WooCommerce settings as a disposable staging test.
+
+## v0.9.4 quality-first staging update
+
+See `CHANGELOG_V0.9.4_UA.md` and `INSTALL_V0.9.4_UA.md`. This retains five agents, WordPress Pull, and the security/policy baseline. It adds media selection from the existing WordPress library, stricter real product identification, full-bleed layout regressions and offline browser QA. The rendering remains Elementor V3 native containers/widgets, not V4 MCP. Do not claim production readiness or visual-wow guarantees from offline tests alone.

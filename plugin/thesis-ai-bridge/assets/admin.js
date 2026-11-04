@@ -48,6 +48,40 @@
   }
   [prompt,renderer,allowPlugins,allowSetup,...briefFields].filter(Boolean).forEach(el=>el.addEventListener(el===prompt || el.tagName==='INPUT' || el.tagName==='TEXTAREA'?'input':'change',scheduleSave));
   updateCounter();
+  // Optional trusted WordPress Media Library picker. Only attachment IDs are
+  // persisted. The server revalidates ownership/type before returning the URL.
+  const selectHero = $('#tai-hero-media-select');
+  const clearHero = $('#tai-hero-media-clear');
+  const heroId = $('#tai-hero-media-id');
+  const heroLabel = $('#tai-hero-media-selection');
+  const heroThumb = $('#tai-hero-media-thumb');
+  if(selectHero && heroId && window.wp && wp.media){
+    let frame;
+    selectHero.addEventListener('click',()=>{
+      if(!frame){
+        frame=wp.media({title:'Обрати головне фото сайту',button:{text:'Використати фото'},library:{type:'image'},multiple:false});
+        frame.on('select',()=>{
+          const item=frame.state().get('selection').first();
+          if(!item) return;
+          const attachment=item.toJSON();
+          heroId.value=String(attachment.id||'');
+          if(heroLabel) heroLabel.textContent=attachment.title||('Зображення #'+heroId.value);
+          const thumbnail=(attachment.sizes&&attachment.sizes.thumbnail&&attachment.sizes.thumbnail.url)||attachment.url;
+          if(heroThumb && thumbnail){heroThumb.src=thumbnail;heroThumb.hidden=false;}
+          scheduleSave();
+        });
+      }
+      frame.open();
+    });
+  }
+  if(clearHero && heroId){
+    clearHero.addEventListener('click',()=>{
+      heroId.value='';
+      if(heroLabel) heroLabel.textContent='Фото не обрано';
+      if(heroThumb){heroThumb.hidden=true;heroThumb.removeAttribute('src');}
+      scheduleSave();
+    });
+  }
 
   const stageToStep = stage => {
     stage=(stage||'').toLowerCase();
@@ -137,7 +171,7 @@
         const json=await post({action:'thesis_ai_preflight',nonce:ThesisAIAdmin.preflightNonce});
         if(preflightResult){
           preflightResult.hidden=false;
-          preflightResult.textContent=json.success?`${ThesisAIAdmin.labels.preflightDone}: ${json.data.pages||0} сторінок · ${json.data.plugins||0} plugins · ${json.data.themes||0} themes`:(json.data&&json.data.message?json.data.message:'Preflight failed');
+          preflightResult.textContent=json.success?`${ThesisAIAdmin.labels.preflightDone}: ${json.data.pages||0} сторінок · ${json.data.plugins||0} plugins · ${json.data.image_count||0} фото у бібліотеці${json.data.image_count===0?' · Для якісного магазину додайте фото перед запуском.':''}`:(json.data&&json.data.message?json.data.message:'Preflight failed');
         }
       }catch(e){ if(preflightResult){preflightResult.hidden=false;preflightResult.textContent='Preflight error: '+e.message;} }
       preflightBtn.disabled=false;preflightBtn.textContent=old;

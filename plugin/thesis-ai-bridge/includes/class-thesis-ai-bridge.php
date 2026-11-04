@@ -310,14 +310,24 @@ final class Thesis_AI_Bridge {
     }
 
     private static function do_media_inventory(): array {
+        $state = get_option('thesis_ai_bridge_ui_state', []);
+        $preferred = is_array($state) ? absint($state['brief']['hero_image_id'] ?? 0) : 0;
         $items = get_posts(['post_type' => 'attachment', 'post_status' => 'inherit',
             'post_mime_type' => 'image', 'posts_per_page' => 25,
             'orderby' => 'date', 'order' => 'DESC']);
+        // The admin-selected image may be older than the 25 most recent files.
+        if ($preferred && wp_attachment_is_image($preferred)) {
+            $selected = get_post($preferred);
+            if ($selected instanceof WP_Post && !in_array($preferred, wp_list_pluck($items, 'ID'))) {
+                array_unshift($items, $selected);
+            }
+        }
         $media = [];
         foreach ($items as $post) {
             $url = wp_get_attachment_image_url($post->ID, 'large');
             if (!$url || !str_starts_with((string)$url, 'https://')) { continue; }
             $media[] = ['id' => (int)$post->ID, 'url' => (string)$url,
+                'preferred_home_hero' => (int)$post->ID === $preferred,
                 'alt' => (string)get_post_meta($post->ID, '_wp_attachment_image_alt', true),
                 'title' => (string)$post->post_title,
                 'caption' => (string)$post->post_excerpt];
@@ -1699,6 +1709,10 @@ final class Thesis_AI_Bridge {
             return $sanitized;
         }
         $settings = self::sanitize_elementor_settings($settings, 'page');
+        // Force these settings ONLY for pages created/owned by this builder.
+        // Some themes ignore Elementor's title setting unless page meta is set.
+        $settings['hide_title'] = 'yes';
+        $settings['page_layout'] = 'elementor_full_width';
 
         $existing = self::safe_ai_draft_by_slug($slug);
         if (is_wp_error($existing)) {
@@ -1743,6 +1757,9 @@ final class Thesis_AI_Bridge {
         if (!$saved) {
             return new WP_Error('thesis_ai_elementor_save_failed', __('Elementor rejected the document save.', 'thesis-ai-bridge'));
         }
+        // Elementor document save may update page settings/template metadata.
+        // Reassert the allowed full-width template after the save completes.
+        update_post_meta($page_id, '_wp_page_template', 'elementor_full_width');
         clean_post_cache($page_id);
         return [
             'id' => $page_id,

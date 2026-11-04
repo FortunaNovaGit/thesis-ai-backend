@@ -41,3 +41,14 @@ body.toplevel_page_thesis-ai-builder #wpcontent{background:var(--tai-bg)}
 .tai-review-next strong{font-size:13px}.tai-review-next ul{margin:8px 0 10px 18px;list-style:disc;color:#43546f;font-size:12px;line-height:1.6}
 .tai-review-next small{font-size:11px;color:#6e7d94}
 @media(max-width:850px){.tai-brief-grid{grid-template-columns:1fr}.tai-brief-panel>summary{flex-wrap:wrap}.tai-brief-panel>summary small{margin-left:0;flex-basis:100%}}
+
+/* v0.9.4: actionable media and product data guidance */
+.tai-media-advice{margin:18px 0 8px;padding:15px 18px;border:1px solid #c7d8fa;border-radius:12px;background:#f5f8ff;color:#243653}
+.tai-media-advice strong{font-weight:700}.tai-media-advice p{margin:5px 0 0;line-height:1.5;color:#435471}
+
+.tai-media-picker{padding:14px 16px;border:1px dashed #bdcbe5;border-radius:12px;background:#fcfdff}
+.tai-media-picker p{color:#62718a;margin:5px 0 12px;font-size:13px}
+.tai-media-picker-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.tai-media-picker-row span{flex:1;min-width:170px;color:#273653;font-weight:600;font-size:13px}
+
+.tai-media-picker-row img:not([hidden]){width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid #dee5f2}

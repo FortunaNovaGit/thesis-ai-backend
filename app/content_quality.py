@@ -22,6 +22,22 @@ INTERNAL_COPY = (
 )
 
 
+# Generic or self-referential filler should not survive as customer-facing copy.
+# Avoid flagging legitimate business claims; this is intentionally a small,
+# explainable list of phrases observed in live generated storefronts.
+VACUOUS_COPY = (
+    "без зайвих обіцянок", "без зайвого ускладнення", "основа представленого формату",
+    "місце для перегляду", "формат допомагає зосередитися на виборі",
+    "спокійний вибір без", "ми подаємо асортимент так", "у форматі шоколадного асорті",
+    "щоб головним залишався сам вибір", "наявної інформації про кожен товар",
+)
+
+
+def looks_like_filler(text: str) -> bool:
+    value = (text or "").casefold()
+    return any(fragment in value for fragment in VACUOUS_COPY)
+
+
 def canonical(text: str) -> str:
     return " ".join(re.findall(r"[^\W_]+", (text or "").casefold(), flags=re.UNICODE))
 
@@ -79,6 +95,9 @@ def audit_experience(experience: ExperienceSpec) -> list[EditorialIssue]:
                 issues.append(EditorialIssue("empty_section", page.page_slug, section.section_type, section_index, section.section_type))
             if looks_like_planning(section.heading) or looks_like_planning(section.body):
                 issues.append(EditorialIssue("planning_copy", page.page_slug, section.section_type, section_index, section.section_type))
+            if looks_like_filler(section.heading) or looks_like_filler(section.body):
+                issues.append(EditorialIssue("vacuous_copy", page.page_slug,
+                                             "Generic copy without visitor value", section_index, section.section_type))
             heading = canonical(section.heading)
             if heading and heading in headings:
                 issues.append(EditorialIssue("duplicate_heading", page.page_slug, section.heading, section_index, section.section_type))

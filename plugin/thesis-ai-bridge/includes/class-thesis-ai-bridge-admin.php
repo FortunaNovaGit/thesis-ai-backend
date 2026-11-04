@@ -48,6 +48,7 @@ final class Thesis_AI_Bridge_Admin {
             [],
             THESIS_AI_BRIDGE_VERSION
         );
+        wp_enqueue_media(); // First-party WordPress image picker; optional and admin-only.
         wp_enqueue_script(
             'thesis-ai-admin',
             plugins_url('assets/admin.js', THESIS_AI_BRIDGE_FILE),
@@ -138,6 +139,21 @@ final class Thesis_AI_Bridge_Admin {
             $value = sanitize_text_field($raw);
             $brief[$key] = function_exists('mb_substr') ? mb_substr($value, 0, $limit) : substr($value, 0, $limit);
         }
+        // Explicit product names are separate from future catalogue size.
+        // Keep a small, sanitized owner-confirmed list, not inferred items.
+        $selected_hero = isset($input['brief_hero_image_id']) ? absint(wp_unslash((string)$input['brief_hero_image_id'])) : 0;
+        $brief['hero_image_id'] = $selected_hero > 0 && wp_attachment_is_image($selected_hero) ? (string)$selected_hero : '';
+        $raw_products = isset($input['brief_products']) && is_scalar($input['brief_products'])
+            ? (string)wp_unslash((string)$input['brief_products']) : '';
+        $names = [];
+        foreach (preg_split('/[\r\n;]+/u', $raw_products) ?: [] as $raw_name) {
+            $name = trim(sanitize_text_field((string)$raw_name), " \t\n\r\0\x0B«»\"");
+            if ($name === '' || !preg_match('/[[:alpha:]]/u', $name)) { continue; }
+            $name = function_exists('mb_substr') ? mb_substr($name, 0, 90) : substr($name, 0, 90);
+            if (!in_array($name, $names, true)) { $names[] = $name; }
+            if (count($names) >= 4) { break; }
+        }
+        $brief['products'] = implode("\n", $names);
         $raw_count = isset($input['brief_product_count']) && is_scalar($input['brief_product_count'])
             ? trim((string)wp_unslash((string)$input['brief_product_count'])) : '';
         $brief['product_count'] = $raw_count !== '' && preg_match('/^\d{1,4}$/', $raw_count)
@@ -164,6 +180,11 @@ final class Thesis_AI_Bridge_Admin {
         $lines = [];
         foreach ($labels as $key => $label) {
             if (!empty($brief[$key])) { $lines[] = $label . ': ' . $brief[$key]; }
+        }
+        if (!empty($brief['products'])) {
+            $names = array_filter(array_map('trim', explode("\n", (string)$brief['products'])));
+            $quoted = array_map(static fn($name) => '«' . $name . '»', array_slice($names, 0, 4));
+            $lines[] = 'ПІДТВЕРДЖЕНІ назви демотоварів (тільки WooCommerce Draft): ' . implode('; ', $quoted);
         }
         if (($brief['assets'] ?? 'unsure') === 'none') {
             $lines[] = 'Власних фотографій немає. Не видавай абстрактну графіку за фото реального товару.';
@@ -357,11 +378,14 @@ final class Thesis_AI_Bridge_Admin {
                                     <label><span>Цільова аудиторія</span><input type="text" name="brief_audience" maxlength="160" placeholder="Кому і для чого потрібен сайт" value="<?php echo esc_attr((string)($brief['audience'] ?? '')); ?>"></label>
                                     <label><span>Потрібні сторінки</span><input type="text" name="brief_pages" maxlength="220" placeholder="Головна, Магазин, Контакти" value="<?php echo esc_attr((string)($brief['pages'] ?? '')); ?>"></label>
                                     <label><span>Кількість товарів у майбутньому каталозі</span><input type="number" name="brief_product_count" min="0" max="1000" placeholder="Наприклад, 24" value="<?php echo esc_attr((string)($brief['product_count'] ?? '')); ?>"></label>
+                                    <div class="tai-brief-wide tai-media-picker" role="group" aria-label="Головне фото для сайту"><strong>Головне фото для Hero</strong><p>Необов'язково. Обери власне фото з Медіафайлів WordPress — воно має пріоритет для головної сторінки. Зображення залишається звичайним редагованим віджетом Elementor.</p><div class="tai-media-picker-row"><input type="hidden" name="brief_hero_image_id" id="tai-hero-media-id" value="<?php echo esc_attr((string)($brief['hero_image_id'] ?? '')); ?>"><img id="tai-hero-media-thumb" alt="Обране головне фото" width="72" height="72" <?php if (!empty($brief['hero_image_id']) && wp_attachment_is_image((int)$brief['hero_image_id'])) : ?>src="<?php echo esc_url((string)wp_get_attachment_image_url((int)$brief['hero_image_id'], 'thumbnail')); ?>"<?php else : ?>hidden<?php endif; ?>><span id="tai-hero-media-selection"><?php echo !empty($brief['hero_image_id']) ? 'Обрано зображення #' . esc_html((string)$brief['hero_image_id']) : 'Фото не обрано'; ?></span><button type="button" class="button" id="tai-hero-media-select">Обрати фото</button><button type="button" class="button" id="tai-hero-media-clear">Прибрати</button></div></div>
+                                    <label class="tai-brief-wide"><span>Реальні назви демотоварів (не більше 4)</span><textarea name="brief_products" rows="3" maxlength="480" placeholder="Асорті 16 цукерок&#10;Асорті 24 цукерки"><?php echo esc_textarea((string)($brief['products'] ?? '')); ?></textarea><small>Одна назва на рядок. Це створить лише чернетки товарів, без вигаданих цін, складу чи залишків. Якщо назв немає — залиш поле порожнім.</small></label>
                                     <label><span>Власні зображення</span><select name="brief_assets"><option value="unsure" <?php selected((string)($brief['assets'] ?? 'unsure'), 'unsure'); ?>>Ще не визначено</option><option value="existing" <?php selected((string)($brief['assets'] ?? ''), 'existing'); ?>>Є в медіабібліотеці WordPress</option><option value="none" <?php selected((string)($brief['assets'] ?? ''), 'none'); ?>>Поки немає</option></select></label>
                                     <label><span>Візуальний характер</span><input type="text" name="brief_style" maxlength="160" placeholder="AI обирає сам або коротка творча підказка" value="<?php echo esc_attr((string)($brief['style'] ?? '')); ?>"></label>
                                     <label><span>Брендові кольори, за бажанням</span><input type="text" name="brief_colors" pattern="#[0-9a-fA-F]{6}(,\s*#[0-9a-fA-F]{6}){0,3}" placeholder="#35221D, #EACD9B" value="<?php echo esc_attr((string)($brief['colors'] ?? '')); ?>"><small>HEX, до чотирьох кольорів. Без заповнення палітру обирає AI.</small></label>
                                     <label class="tai-brief-wide"><span>Лише підтверджені факти</span><textarea name="brief_facts" rows="3" maxlength="480" placeholder="Наприклад, назви реальних товарів, підтверджені особливості виробництва, адреса — тільки якщо достовірно відома"><?php echo esc_textarea((string)($brief['facts'] ?? '')); ?></textarea></label>
                                 </div>
+                                <div class="tai-media-advice" role="note"><strong>Візуальна якість магазину</strong><p>Для ефектного магазину додайте в Медіафайли WordPress власні фото товарів і пакування до запуску. Система підбирає лише відповідні зображення з медіабібліотеки; без них створить чесну типографічну композицію без псевдофото. Точну назву кожного демотовару вкажіть серед підтверджених фактів у форматі «Асорті 16 цукерок», «Асорті 24 цукерки». Кнопки та заголовки не перетворюються на товари.</p></div>
                                 <div class="tai-brief-note"><span class="dashicons dashicons-info-outline"></span><span>Це не імпорт каталогу: поточний WooCommerce Builder може створювати лише обмежену кількість демо-чернеток за явними назвами. Фото товарів, ціни, склад та залишки треба підтвердити окремо. Сторінки залишаються Draft.</span></div>
                             </div>
                         </details>
@@ -380,7 +404,7 @@ final class Thesis_AI_Bridge_Admin {
                             <span id="thesis-ai-autosave" class="tai-autosave"><?php echo esc_html__('Чернетка зберігається автоматично', 'thesis-ai-bridge'); ?></span>
                         </div>
                     </form>
-                    <?php if ($preflight) : ?><div class="tai-preflight" id="thesis-ai-preflight-result"><strong><?php echo esc_html__('Останній preflight:', 'thesis-ai-bridge'); ?></strong> <?php echo esc_html(sprintf(__('%1$d сторінок · %2$d plugins · %3$d themes', 'thesis-ai-bridge'), (int)($preflight['pages'] ?? 0), (int)($preflight['plugins'] ?? 0), (int)($preflight['themes'] ?? 0))); ?></div><?php else : ?><div class="tai-preflight" id="thesis-ai-preflight-result" hidden></div><?php endif; ?>
+                    <?php if ($preflight) : ?><div class="tai-preflight" id="thesis-ai-preflight-result"><strong><?php echo esc_html__('Останній preflight:', 'thesis-ai-bridge'); ?></strong> <?php echo esc_html(sprintf(__('%1$d сторінок · %2$d plugins · %3$d фото у бібліотеці', 'thesis-ai-bridge'), (int)($preflight['pages'] ?? 0), (int)($preflight['plugins'] ?? 0), (int)($preflight['image_count'] ?? 0))); ?></div><?php else : ?><div class="tai-preflight" id="thesis-ai-preflight-result" hidden></div><?php endif; ?>
                 </section>
 
                 <section class="tai-card tai-process-card <?php echo !empty($active_build['job_id']) ? 'is-running' : ''; ?>" id="thesis-ai-process">

@@ -614,19 +614,41 @@ def reconcile_experience(
     return experience.model_copy(update={"pages": output, "generative_design": creative})
 
 def explicitly_named_demo_products(user_request: str, *, max_products: int = 4) -> list[str]:
-    """Extract only product names explicitly quoted by the user.
+    """Extract *explicit catalog names*, never CTA/marketing microcopy.
 
-    AI-generated suggestions are deliberately not trusted as product facts.
-    Anything unquoted/ambiguous is omitted; products never receive inferred prices.
+    Quotation marks are not a product declaration. A request containing
+    `кнопка «Обрати цукерки»` must NOT create that as a product. Keep this
+    deterministic, fail closed on ambiguity and never infer a price or stock.
     """
-    quoted = re.findall(r"[«\"]([^»\"]{3,100})[»\"]", user_request or "")
+    text = user_request or ""
+    # Structured owner-confirmed product names always win over informal quotes
+    # elsewhere in the prompt (headlines, CTA labels, etc.).
+    confirmed = re.search(r"(?im)^ПІДТВЕРДЖЕНІ назви демотоварів[^\n]*?:\s*([^\n]+)", text)
+    if confirmed:
+        text = confirmed.group(1)
+    quoted = re.finditer(r"[«\"]([^»\"]{3,100})[»\"]", text)
     result: list[str] = []
-    for raw in quoted:
-        title = " ".join(raw.strip().split())
+    for match in quoted:
+        title = " ".join(match.group(1).strip().split())
         lower = title.casefold()
-        if not any(term in lower for term in ("цукер", "шоколад", "асорті", "пралін", "набір")):
+        # Imperative labels (even when containing product words) are actions.
+        if re.match(r"^(обрат[иь]|купит[иь]|переглянут[иь]|замовит[иь]|дізнатис[яь]|написат[иь]|get |shop |buy |view )", lower):
             continue
-        if title not in result and len(title) <= 100:
+        if not confirmed and not re.search(r"\b(асорті|набір|набори|коробка|цукерки|шоколад|пралін|трюфел)", lower):
+            continue
+        # Explicit item list context, not a CTA/button/UI instruction.
+        prefix = text[max(0, match.start() - 140):match.start()].casefold()
+        segment = re.split(r"[.!?\n]", prefix)[-1]
+        if re.search(r"(?:кнопк[ауи]|cta|заклик|button|посиланн|текст кнопк|заголовк\w*|заголовок|слоган\w*|hero|хедлайн\w*)\s*[:—-]?\s*$", segment):
+            continue
+        catalog_context = any(term in prefix for term in (
+            "товар", "назв", "позиці", "демо", "чернетк", "асортимент", "каталог", "product", "collection", "sku",
+        ))
+        # Names with explicit quantity can stand alone; a CTA cannot.
+        recognizable_name = bool(re.match(r"^(?:асорті|набір|коробка|пралін|трюфел|шоколад)", lower))
+        if not (confirmed or catalog_context or recognizable_name):
+            continue
+        if title not in result:
             result.append(title)
         if len(result) >= max_products:
             break
@@ -634,20 +656,13 @@ def explicitly_named_demo_products(user_request: str, *, max_products: int = 4) 
 
 
 def safe_demo_products(user_request: str, *, max_products: int = 4) -> list[str]:
-    """Explicit names take precedence. Optional anonymous templates are clearly drafts.
+    """Create draft products only from owner-confirmed explicit names.
 
-    Placeholder generation requires a request for demonstration/placeholder stock,
-    not merely a store request. These are not real offerings or purchasable items.
+    A requested future catalog size or an unspecified 'demo catalog' is not
+    permission to invent item records. Return an empty list rather than 01/02
+    placeholders that look like real inventory on the generated storefront.
     """
-    named = explicitly_named_demo_products(user_request, max_products=max_products)
-    if named:
-        return named
-    text = (user_request or "").casefold()
-    if any(x in text for x in ("демонстраційн", "демо-товар", "demo product", "товари-заготовки", "шаблонні товари")) and any(
-        x in text for x in ("магазин", "товар", "woocommerce", "shop", "ecommerce")
-    ):
-        return ["Демо-товар 01 — заповнити", "Демо-товар 02 — заповнити", "Демо-товар 03 — заповнити"][:max_products]
-    return []
+    return explicitly_named_demo_products(user_request, max_products=max_products)
 
 
 def site_design_profile(user_request: str, base: DesignSystem) -> DesignSystem:

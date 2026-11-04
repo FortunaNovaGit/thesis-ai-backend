@@ -299,3 +299,97 @@ body.thesis-ai-generated .elementor .tai-generative .tai-product-art {
 }
 body.thesis-ai-generated .elementor .tai-generative .tai-product-art:before,
 body.thesis-ai-generated .elementor .tai-generative .tai-product-art:after {display:none!important}
+
+
+/* v0.9.4 — full-bleed breakout and clear visual hierarchy.
+   A live EasyWP screenshot showed all sections trapped in an ~770px theme
+   wrapper even when Elementor Full Width was requested. The breakout is
+   limited to AI-owned pages; it does not modify other WordPress content. */
+body.thesis-ai-generated .site-main,
+body.thesis-ai-generated .site-main > article,
+body.thesis-ai-generated #content,
+body.thesis-ai-generated .entry-content,
+body.thesis-ai-generated .page-content,
+body.thesis-ai-generated .elementor.elementor-location-single,
+body.thesis-ai-generated .elementor {
+  max-width:none!important;
+}
+/* Preserve centering even when the theme has a fixed-width content wrapper. */
+body.thesis-ai-generated main#content,
+body.thesis-ai-generated #content.site-main,
+body.thesis-ai-generated .site-main>article{margin-left:auto!important;margin-right:auto!important;}
+body.thesis-ai-generated .entry-header,
+body.thesis-ai-generated .site-main > article > .entry-title,
+body.thesis-ai-generated .site-main > article > header.page-header,
+body.thesis-ai-generated .elementor-page-title {display:none!important}
+body.thesis-ai-generated .elementor .thesis-ai-section {
+  box-sizing:border-box!important;
+  position:relative!important;
+  width:100vw!important;
+  max-width:100vw!important;
+  margin-left:calc(50% - 50vw)!important;
+  margin-right:calc(50% - 50vw)!important;
+  padding-left:clamp(20px,4vw,80px)!important;
+  padding-right:clamp(20px,4vw,80px)!important;
+  overflow:visible!important;
+}
+body.thesis-ai-generated .elementor .thesis-ai-section>.e-con,
+body.thesis-ai-generated .elementor .thesis-ai-section>.elementor-widget,
+body.thesis-ai-generated .elementor .thesis-ai-section>.e-con-inner {
+  max-width:min(100%,var(--tai-layout-width,1280px))!important;
+  width:100%!important;
+  margin-left:auto!important;
+  margin-right:auto!important;
+  min-width:0!important;
+}
+body.thesis-ai-generated .elementor .thesis-ai-section>.elementor-widget-heading .elementor-heading-title{
+  max-width:24ch;
+}
+body.thesis-ai-generated .elementor .thesis-ai-section>.elementor-widget-text-editor p{
+  max-width:67ch;
+}
+body.thesis-ai-generated .elementor .thesis-ai-section>.tai-card-grid,
+body.thesis-ai-generated .elementor .thesis-ai-section>.tai-hero-grid{max-width:var(--tai-layout-width,1280px)!important}
+body.thesis-ai-generated .elementor .tai-visual-typography .tai-hero-copy{
+  max-width:1050px!important;
+}
+body.thesis-ai-generated .elementor .tai-visual-typography .tai-hero-copy h1.elementor-heading-title{
+  max-width:18ch!important;
+  font-size:clamp(2.9rem,5.5vw,6rem)!important;
+  text-wrap:balance;
+}
+/* A missing photo never produces a large image placeholder. Only an editable,
+   compact editorial product listing is rendered. */
+body.thesis-ai-generated .elementor .tai-product-card-text-only{
+  background:transparent!important;
+  border:0!important;
+  border-top:1px solid color-mix(in srgb,var(--tai-text) 23%,transparent)!important;
+  border-radius:0!important;
+  box-shadow:none!important;
+  min-height:0!important;
+}
+body.thesis-ai-generated .elementor .tai-product-card-text-only:hover{transform:none;box-shadow:none}
+body.thesis-ai-generated .elementor .tai-product-card-text-only h3.elementor-heading-title{
+  font-size:clamp(1.5rem,2.5vw,2.4rem)!important;
+  line-height:1.12!important;
+}
+/* Default editorial list is deliberately compact: not a wall of 3 empty cards. */
+body.thesis-ai-generated .elementor .tai-generative.tai-presentation-list .tai-card-grid>.e-con{
+  min-height:0!important;
+}
+@media(max-width:767px){
+  body.thesis-ai-generated .elementor .thesis-ai-section{
+    padding-left:20px!important;padding-right:20px!important;
+  }
+  body.thesis-ai-generated .elementor .tai-visual-typography .tai-hero-copy h1.elementor-heading-title{
+    font-size:clamp(2.4rem,10vw,3.8rem)!important;
+    max-width:100%!important;
+  }
+}
+
+/* Keep factual two-line cards compact, except intentional AI bento emphasis. */
+body.thesis-ai-generated .elementor .tai-generative:not(.tai-presentation-bento) .tai-feature-card{
+  min-height:0!important;
+  padding:clamp(20px,2.3vw,36px)!important;
+  box-shadow:none!important;
+}
