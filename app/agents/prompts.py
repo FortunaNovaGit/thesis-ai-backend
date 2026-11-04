@@ -63,17 +63,31 @@ CRITICAL GENERATIVE DESIGN TASK (in this same design call, no sixth agent):
 - Propose 2–3 substantially different CreativeDirection candidates with unique ids,
   narrative, composition, typography contrast, and visual motif.
 - Select one, explain selection briefly, and design page-specific SectionLayoutSpec
-  parameters for each section. Output generative_design{candidates,
-  selected_direction_id,selection_reason,page_layouts}.
+  parameters for each section. Output generative_design{{candidates,
+  selected_direction_id,selection_reason,page_layouts}}.
 - Section layouts are authored for each page index. section_index is 0-based and
   must refer to the final section_specs order; include a Home hero at index 0.
 - Geometry controls are low-level primitives, NOT predesigned site templates:
   composition split/stacked/centered/offset; media_position start/end;
   text_width_pct 35..70; max_width 720..1440; vertical_space 36..168;
   art_ratio square/portrait/landscape/wide; motif none/halo/lines/frame/gradient;
-  card_columns 1..4; heading_emphasis calm/balanced/dramatic.
+  card_columns 1..4; heading_emphasis calm/balanced/dramatic;
+  card_presentation grid/bento/list; surface_treatment canvas/tinted/bordered;
+  content_alignment start/center; visual_treatment abstract/typography/media;
+  accent_detail none/rule/index. Use these as an expressive design grammar,
+  not pre-built templates; make each section visually and narratively purposeful.
 - Compose an original editorial rhythm and hierarchy from these dimensions;
   never repeat the same composition at every section just for convenience.
+- A page must have a clear art direction: a decisive hero, breathing space,
+  sections that change rhythm, purposeful card/list treatment, a quiet close.
+  Choose the visual grammar according to the SPECIFIC content, not randomly.
+- Prefer visual_treatment=typography for a confident editorial hero when no
+  trustworthy imagery exists. Media means existing WP media only; when absent,
+  an abstract design is an illustration, NEVER a photographed product.
+- Keep card_presentation=bento to groups of at least 3 meaningful cards.
+  A list works well for processes, FAQs and complex information.
+- Use different background/surface treatments to define a beginning,
+  supporting information and a strong final CTA; don't put every block in boxes.
 - Visual motifs must work as abstract decoration even without product photography.
 - Do NOT output raw CSS, JavaScript, HTML or remote image URLs. All designs
   are compiled to safe native Elementor widgets by a deterministic adapter.
@@ -100,6 +114,10 @@ CONTENT QUALITY RULES:
   same marketing sentence across Home, Products, Contact and all calls to action.
 - Write copy that answers a visitor question. Each paragraph must contain at least
   one concrete helpful detail, not just "quality, care, professionalism".
+- Each section needs a distinct takeaway and noninterchangeable copy. If a
+  section could fit ANY competing business without changes, rewrite it.
+- Do not invent shipping conditions, dispatch times, payment options, warranty,
+  medical treatment availability, ingredient profiles, team size or discounts.
 - For ecommerce use customer-decision information: recipient/occasion, format,
   assortment, how to ask about ingredients, or how ordering works. Do NOT make
   product properties or prices up; distinguish advice from verified facts.

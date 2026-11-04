@@ -248,6 +248,13 @@ class SectionLayoutSpec(BaseModel):
     motif: Literal["none", "halo", "lines", "frame", "gradient"] = "none"
     card_columns: int = Field(default=3, ge=1, le=4)
     heading_emphasis: Literal["calm", "balanced", "dramatic"] = "balanced"
+    # Independent primitives per section, composed by the Creative Director.
+    # No fixed site template or LLM-supplied executable CSS is accepted.
+    card_presentation: Literal["grid", "bento", "list"] = "grid"
+    surface_treatment: Literal["canvas", "tinted", "bordered"] = "canvas"
+    content_alignment: Literal["start", "center"] = "start"
+    visual_treatment: Literal["abstract", "typography", "media"] = "abstract"
+    accent_detail: Literal["none", "rule", "index"] = "none"
 
 
 class PageLayoutSpec(BaseModel):

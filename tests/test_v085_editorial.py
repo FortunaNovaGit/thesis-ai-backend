@@ -93,6 +93,6 @@ def test_reconciliation_uses_distinct_domain_copy_when_llm_repeats_same_paragrap
 
 
 def test_css_cards_are_scoped_to_generated_pages():
-    css = (Path(__file__).resolve().parents[2] / 'plugin' / 'thesis-ai-bridge' / 'assets' / 'front.css').read_text()
+    css = (Path(__file__).resolve().parents[1] / 'plugin' / 'thesis-ai-bridge' / 'assets' / 'front.css').read_text()
     assert 'body.thesis-ai-generated .elementor .tai-card-grid-benefits' in css
     assert 'body.thesis-ai-generated .elementor .tai-card-grid-process' in css

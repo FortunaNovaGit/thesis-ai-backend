@@ -115,13 +115,30 @@ def _text(text: str, color: str, ds: DesignSystem, *, size: int = 18) -> dict[st
     })
 
 
+def _readable_ink(background: str) -> str:
+    """Choose accessible ink for variable AI-selected hex button colors."""
+    color = background.lstrip("#")
+    if len(color) == 3:
+        color = "".join(c * 2 for c in color)
+    if len(color) != 6:
+        return "#FFFFFF"
+    try:
+        channels = [int(color[i:i+2], 16) / 255 for i in (0, 2, 4)]
+    except ValueError:
+        return "#FFFFFF"
+    linear = [v / 12.92 if v <= .04045 else ((v + .055) / 1.055) ** 2.4 for v in channels]
+    luminance = sum(a*b for a, b in zip(linear, (.2126, .7152, .0722)))
+    return "#101015" if luminance > .179 else "#FFFFFF"
+
+
 def _button(label: str, url: str, ds: DesignSystem, *, accent: bool = False) -> dict[str, Any]:
+    bg = ds.accent if accent else ds.primary
     return _widget("button", {
         "text": html.escape(label, quote=False),
         "link": {"url": url, "is_external": "", "nofollow": ""},
         "size": "md",
-        "background_color": ds.accent if accent else ds.primary,
-        "button_text_color": "#FFFFFF",
+        "background_color": bg,
+        "button_text_color": _readable_ink(bg),
         "border_radius": _box(ds.radius, ds.radius, ds.radius, ds.radius),
         "typography_typography": "custom",
         "typography_font_family": ds.body_font,
@@ -163,7 +180,7 @@ def _editorial_product_card(title: str, body: str, ds: DesignSystem, index: int,
                             "typography_font_size": _px(13)}),
     ]), {"content_width": "full", "min_height": _px(205), "justify_content": "center",
         "align_items": "center", "padding": _box(0,0,0,0) if media else _box(20,20,20,20),
-        "css_classes": "tai-product-art-photo" if media else "tai-product-art"})
+        "css_classes": "tai-product-art-photo" if media else f"tai-product-art tai-product-art-{index % 4}"})
     label = _widget("heading", {"title": "ДЕМОНСТРАЦІЙНА КАРТКА", "header_size": "div", "title_color": ds.accent,
                                "typography_typography": "custom", "typography_font_family": ds.body_font,
                                "typography_font_size": _px(11), "typography_font_weight": "700"})
@@ -415,9 +432,16 @@ def _apply_generative_layout(element: dict[str, Any], spec: SectionLayoutSpec, *
                f"tai-media-{spec.media_position}", f"tai-split-{split}",
                f"tai-max-{max_width}", f"tai-motif-{spec.motif}",
                f"tai-ratio-{spec.art_ratio}", f"tai-heading-{spec.heading_emphasis}",
-               f"tai-columns-{spec.card_columns}"]
+               f"tai-columns-{spec.card_columns}",
+               f"tai-presentation-{spec.card_presentation}",
+               f"tai-surface-{spec.surface_treatment}",
+               f"tai-content-{spec.content_alignment}",
+               f"tai-visual-{spec.visual_treatment}",
+               f"tai-detail-{spec.accent_detail}"]
     root["css_classes"] = " ".join(classes)
     root["padding"] = _box(spec.vertical_space, 24, spec.vertical_space, 24)
+    if spec.surface_treatment == "tinted":
+        root["background_color"] = root.get("background_color") or "#F8FAFC"
     # Stable root ID permits targeted delta repair and section-level comparisons.
     element["id"] = hashlib.sha256(f"thesis-ai:{page_slug}:{index}".encode()).hexdigest()[:8]
     # Elementor-native widths still apply when the companion CSS is not loaded.
@@ -425,12 +449,18 @@ def _apply_generative_layout(element: dict[str, Any], spec: SectionLayoutSpec, *
     for descendant in descendants:
         settings = descendant.get("settings", {})
         if "tai-hero-grid" in settings.get("css_classes", ""):
-            settings["flex_direction"] = "column" if spec.composition in {"stacked", "centered"} else "row"
+            if spec.visual_treatment == "typography":
+                # A confident typographic editorial cover is better than a
+                # generic fake image rectangle when no verified media exists.
+                descendant["elements"] = [child for child in descendant.get("elements", [])
+                     if not any(tag in child.get("settings", {}).get("css_classes", "")
+                                for tag in ("tai-hero-art", "tai-hero-photo"))]
+            settings["flex_direction"] = "column" if spec.composition in {"stacked", "centered"} or spec.visual_treatment == "typography" else "row"
             settings["flex_direction_mobile"] = "column"
             settings["gap"] = _px(32)
             for child_index, child in enumerate(descendant.get("elements", [])):
                 child_settings = child.get("settings", {})
-                if spec.composition in {"split", "offset"}:
+                if spec.composition in {"split", "offset"} and spec.visual_treatment != "typography":
                     width = split if child_index == 0 else 100 - split
                     child_settings["width"] = _pct(width)
                 else:
@@ -449,22 +479,19 @@ def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem, media: li
     if not specs:
         specs = [SectionContentSpec(section_type="content", heading=page.page_name, body=page.page_goal)]
     selected_image = choose_page_media(page, media or [])
+    # Defense in depth for direct compiler callers bypassing the planning gate.
+    # Unique, valid Creative Director headings pass through unchanged.
     seen_headings: set[str] = set()
-    better_headings = {
-        "products": "Обирайте з колекції", "services": "Що ми пропонуємо",
-        "benefits": "Чому обирають нас", "trust": "Наш підхід",
-        "contact": "Зв’яжіться з нами", "cta": "Зробіть наступний крок",
-        "faq": "Поширені запитання", "process": "Як усе працює",
-    }
     for index, section in enumerate(specs):
-        # Never render a second identical section heading on one page.
-        key = section.heading.strip().casefold()
-        if index > 0 and (key in seen_headings or key == page.page_name.casefold()):
-            alternative = better_headings.get(section.section_type, "Дізнайтеся більше")
-            if alternative.casefold() in seen_headings:
-                alternative = f"{alternative} — {index + 1}"
-            section = section.model_copy(update={"heading": alternative})
-        seen_headings.add(section.heading.strip().casefold())
+        key = " ".join(section.heading.casefold().split())
+        if key in seen_headings or (index > 0 and key == page.page_name.casefold()):
+            label = section.items[0].split(" — ", 1)[0].strip() if section.items else ""
+            if not label or len(label) > 68 or " ".join(label.casefold().split()) in seen_headings:
+                label = f"{page.page_name} · {section.section_type.title()}"
+            while " ".join(label.casefold().split()) in seen_headings:
+                label += " ·"
+            section = section.model_copy(update={"heading": label})
+        seen_headings.add(" ".join(section.heading.casefold().split()))
         section_type = section.section_type.lower().strip() or "content"
         if index == 0 and section_type not in {"hero", "products"}:
             section_type = "hero"

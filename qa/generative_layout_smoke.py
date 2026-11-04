@@ -6,7 +6,7 @@ No HTTP requests or OpenAI calls are made. Usage: python qa/generative_layout_sm
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 CSS = (ROOT / "plugin/thesis-ai-bridge/assets/front.css").read_text()
 OUT = ROOT / "synthetic-layout-evidence"
 OUT.mkdir(exist_ok=True)

@@ -1,8 +1,8 @@
-# Thesis AI / AI Website Builder — backend v0.9.0
+# Thesis AI / AI Website Builder — backend v0.9.1
 
 Five-agent FastAPI planning backend, PostgreSQL/SQLite job store, WordPress Pull local execution and a safe, editable Elementor V3 generative layout contract.
 
-**New in v0.9.0:** Creative Director (2–3 concept proposals), `GenerativeDesignSpec`, bounded responsive Elementor-native geometry, deterministic repair of duplicate page/site headings, retained Content Quality Gate. See [changelog](CHANGELOG_V0.9.0_UA.md) and [update guide](INSTALL_V0.9.0_UA.md) (Ukrainian).
+**New in v0.9.1:** Creative Director (2–3 concept proposals), `GenerativeDesignSpec`, bounded responsive Elementor-native geometry, deterministic repair of duplicate page/site headings, retained Content Quality Gate. See [changelog](CHANGELOG_V0.9.1_UA.md) and [update guide](INSTALL_V0.9.1_UA.md) (Ukrainian).
 
 ## Offline tests — zero OpenAI API usage
 
@@ -15,6 +15,7 @@ Optional synthetic visual smoke (requires Playwright + system Chromium at `/usr/
 
 ```bash
 python qa/generative_layout_smoke.py
+python qa/v091_primitives_smoke.py
 ```
 
 This test is **not a live WordPress browser QA**. Actual deployment and real Elementor editability need a staging test.

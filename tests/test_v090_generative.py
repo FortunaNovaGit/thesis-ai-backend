@@ -183,7 +183,7 @@ def test_three_page_mock_plan_keeps_shop_untouched_and_has_creative_artifacts():
 
 
 def test_generatively_scoped_css_and_readable_mobile_rules_exist():
-    css = (Path(__file__).parents[2] / "plugin" / "thesis-ai-bridge" / "assets" / "front.css").read_text()
+    css = (Path(__file__).parents[1] / "plugin" / "thesis-ai-bridge" / "assets" / "front.css").read_text()
     assert "body.thesis-ai-generated .elementor .tai-generative" in css
     assert ".tai-layout-centered" in css and ".tai-media-start" in css
     assert "@media(max-width:767px)" in css

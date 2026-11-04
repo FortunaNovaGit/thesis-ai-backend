@@ -444,14 +444,26 @@ def reconcile_experience(
 
             heading = (sec.heading or "").strip()
             body = (sec.body or "").strip()
-            if not heading or (index > 0 and heading.casefold() == page.name.casefold()) or heading.casefold() in used_headings or _looks_internal_copy(heading):
+            # Preserve the Creative Director's authored copy. Duplicates are
+            # repaired by the dedicated editorial pass, not replaced here by
+            # a generic per-section fallback (which caused repeated templates).
+            if not heading or _looks_internal_copy(heading):
                 heading = fallback.heading
-            if (not body or len(body) < 45 or _looks_internal_copy(body) or looks_like_planning(body)
-                or any(too_similar(body, prev) for prev in [*used_bodies, *global_bodies])):
+            if not body or _looks_internal_copy(body) or looks_like_planning(body):
                 body = fallback.body
+            # Do not overwrite specific, concise, visitor-facing sentences
+            # only because they are shorter than a hardcoded threshold. Exact
+            # and near-duplicate bodies are checked by the editorial gate.
             # A fallback must not copy generic planning text into another section.
+            # Repair an *actual* repeated paragraph only. Do not replace
+            # concise, original content with generic marketing copy.
             if any(too_similar(body, prev) for prev in [*used_bodies, *global_bodies]):
-                body = ""
+                replacement_body = fallback.body
+                if replacement_body and not any(too_similar(replacement_body, prev)
+                                                for prev in [*used_bodies, *global_bodies]):
+                    body = replacement_body
+                # Otherwise the unchanged duplication remains visible to the
+                # predeployment Quality Gate, which fails closed.
 
             items = list(dict.fromkeys(
                 x.strip() for x in sec.items if str(x).strip() and not looks_like_planning(str(x))
@@ -1012,7 +1024,7 @@ def _compact_schema(model: type[BaseModel]) -> str:
 HINTS: dict[str, str] = {
     "ProjectBrief": "Keys: site_type, language, primary_goal, secondary_goals[], audiences[], tone, renderer, requested_pages[], requirements[], known_facts{}, missing_facts[], constraints[].",
     "ArchitectureBundle": "Keys: site_title, tagline, theme_slug, pages[{name,slug,purpose,search_intent,primary_cta,primary_cta_url,section_goals[]}], capabilities[{capability,reason,priority}], content_types[], content_matrix[{page_slug,page_goal,search_intent,primary_cta,secondary_cta,key_messages[],internal_links[]}], security_requirements[], performance_requirements[].",
-    "ExperienceSpec": "Keys: generative_design{candidates[2-3]{id,name,narrative,composition,typographic_contrast,visual_motif},selected_direction_id,selection_reason,page_layouts[{page_slug,sections[{section_index,composition:split|stacked|centered|offset,media_position:start|end,text_width_pct:35..70,max_width:720..1440,vertical_space:36..168,art_ratio:square|portrait|landscape|wide,motif:none|halo|lines|frame|gradient,card_columns:1..4,heading_emphasis:calm|balanced|dramatic}]}]}, design_direction, design_system{primary,accent,background,surface,text,muted,heading_font,body_font,container_width,section_spacing,radius}, component_rules[], pages[{page_name,page_slug,page_goal,sections[],section_specs[{section_type,component_key,section_goal,eyebrow,heading,body,items[],cta_label,cta_url,style_variant}],content_guidance[],responsive_notes[],accessibility_notes[],seo{slug,title,meta_description,h1,internal_link_targets[],schema_types[]}}].",
+    "ExperienceSpec": "Keys: generative_design{candidates[2-3]{id,name,narrative,composition,typographic_contrast,visual_motif},selected_direction_id,selection_reason,page_layouts[{page_slug,sections[{section_index,composition:split|stacked|centered|offset,media_position:start|end,text_width_pct:35..70,max_width:720..1440,vertical_space:36..168,art_ratio:square|portrait|landscape|wide,motif:none|halo|lines|frame|gradient,card_columns:1..4,heading_emphasis:calm|balanced|dramatic,card_presentation:grid|bento|list,surface_treatment:canvas|tinted|bordered,content_alignment:start|center,visual_treatment:abstract|typography|media,accent_detail:none|rule|index}]}]}, design_direction, design_system{primary,accent,background,surface,text,muted,heading_font,body_font,container_width,section_spacing,radius}, component_rules[], pages[{page_name,page_slug,page_goal,sections[],section_specs[{section_type,component_key,section_goal,eyebrow,heading,body,items[],cta_label,cta_url,style_variant}],content_guidance[],responsive_notes[],accessibility_notes[],seo{slug,title,meta_description,h1,internal_link_targets[],schema_types[]}}].",
     "BuildPlan": "Keys: actions[{ability,parameters{},rationale}]. Keep actions minimal.",
     "QualityReport": "Keys: passed, summary, checks_performed[], issues[{id,category,severity,description,responsible_agent,suggested_fix}].",
 }
