@@ -87,8 +87,12 @@ final class Thesis_AI_Bridge {
         $radius = max(0, min(40, absint($design['radius'] ?? 18)));
         $heading_font = trim(preg_replace('/[^a-zA-Z0-9 ,\-]/', '', (string)($design['heading_font'] ?? 'Inter')) ?: 'Inter');
         $body_font = trim(preg_replace('/[^a-zA-Z0-9 ,\-]/', '', (string)($design['body_font'] ?? 'Inter')) ?: 'Inter');
+        $rgb = [hexdec(substr($primary, 1, 2)) / 255, hexdec(substr($primary, 3, 2)) / 255, hexdec(substr($primary, 5, 2)) / 255];
+        $linear = array_map(static function ($c) { return $c <= 0.04045 ? $c / 12.92 : (($c + 0.055) / 1.055) ** 2.4; }, $rgb);
+        $luminance = $linear[0] * 0.2126 + $linear[1] * 0.7152 + $linear[2] * 0.0722;
+        $on_primary = $luminance > 0.179 ? '#101015' : '#FFFFFF';
         echo "<style id=\"thesis-ai-site-design\">\n";
-        echo ':root{--tai-primary:' . esc_html($primary) . ';--tai-accent:' . esc_html($accent) . ';--tai-bg:' . esc_html($background) . ';--tai-surface:' . esc_html($surface) . ';--tai-text:' . esc_html($text) . ';--tai-muted:' . esc_html($muted) . ';--tai-radius:' . esc_html((string)$radius) . 'px;}';
+        echo ':root{--tai-primary:' . esc_html($primary) . ';--tai-accent:' . esc_html($accent) . ';--tai-bg:' . esc_html($background) . ';--tai-surface:' . esc_html($surface) . ';--tai-text:' . esc_html($text) . ';--tai-muted:' . esc_html($muted) . ';--tai-radius:' . esc_html((string)$radius) . 'px;--tai-on-primary:' . esc_html($on_primary) . ';}';
         echo 'body.thesis-ai-generated,body.woocommerce-shop{background:var(--tai-bg);color:var(--tai-text);font-family:' . esc_html($body_font) . ',system-ui,sans-serif;}';
         echo 'body.thesis-ai-generated :is(h1,h2,h3,h4,h5,h6,.site-title),body.woocommerce-shop :is(h1,h2,h3,h4,h5,h6,.site-title){font-family:' . esc_html($heading_font) . ',system-ui,sans-serif;}';
         echo 'body.thesis-ai-generated a,body.woocommerce-shop a{color:var(--tai-primary);}';

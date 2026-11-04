@@ -29,3 +29,7 @@ uvicorn app.api:app --reload
 ```
 
 Render requires an existing stable `BACKEND_TOKEN_SECRET`, PostgreSQL `DATABASE_URL`, and `OPENAI_API_KEY` for `AGENT_MODE=auto`. Do not regenerate an already configured token secret. Never commit API keys, database URLs or pairing secrets.
+
+## v0.9.2 split creative contracts
+
+The Creative Director role now makes a site-wide `CreativeFoundation` call, followed by one `CreativePage` call per page. `app/creative_pipeline.py` compiles these typed outputs into the unchanged downstream `ExperienceSpec`. This prevents one giant multi-page output from omitting required headings/SEO and lets one bounded JSON retry repair only the failed page. All rendering still uses WordPress Pull + native Elementor V3 containers/widgets; no executable LLM-generated CSS/HTML. Use `python qa/visual_audit.py --help` for optional non-OpenAI live preview checks. A successful offline fixture does not certify a deployed site.

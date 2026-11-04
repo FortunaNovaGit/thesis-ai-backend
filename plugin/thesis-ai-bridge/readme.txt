@@ -3,14 +3,14 @@ Contributors: thesis-prototype
 Tags: ai, elementor, abilities-api, automation, wordpress
 Requires at least: 6.6
 Requires PHP: 8.0
-Stable tag: 0.9.1
+Stable tag: 0.9.2
 License: GPLv2 or later
 
 Controlled local WordPress execution layer for a five-agent master's thesis prototype.
 
 == Description ==
 
-Version 0.9.1 adds safe generative Elementor section geometry and responsive artwork while retaining the v0.8.5 WordPress Pull executor:
+Version 0.9.2 adds safe generative Elementor section geometry and responsive artwork while retaining the v0.8.5 WordPress Pull executor:
 
 * Five-role artifact pipeline: Orchestrator, Architect/Capability, Design/Content/SEO, deterministic WordPress Implementation, Quality/Security.
 * WordPress background worker continues builds even if the admin tab is refreshed, backgrounded or closed.

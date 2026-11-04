@@ -38,6 +38,7 @@ from ..models import (
     TaskItem,
     TaskPlan,
 )
+from ..creative_pipeline import CreativeFoundation, CreativePage, compose_experience
 from .prompts import (
     architect_prompt,
     builder_prompt,
@@ -154,20 +155,29 @@ def _normalize_architecture(brief: ProjectBrief, architecture: ArchitectureBundl
             continue
         seen.add(slug)
         goals = list(dict.fromkeys([str(x).strip().lower() for x in page.section_goals if str(x).strip()]))
-        # Guardrails for the common business-site path. The Architect still decides
-        # the page set and intent; these defaults prevent a sparse plan from turning
-        # into a page with one repeated heading.
-        required_by_slug: dict[str, list[str]] = {
-            "home": ["hero", "services", "benefits", "cta"],
-            "services": ["hero", "services", "process", "cta"],
-            "contact": ["hero", "contact"],
-            "about": ["hero", "content", "benefits", "cta"],
-            "doctors": ["hero", "team", "trust", "cta"],
-            "booking": ["hero", "booking", "faq"],
-        }
-        for required in required_by_slug.get(slug, ["hero", "content", "cta"]):
-            if required not in goals:
-                goals.append(required)
+        # An Architect's original page sequence is authoritative. Older code
+        # forced services/benefits/content on EVERY Home/Shop page, turning the
+        # Creative Director's site-specific concept back into a generic template.
+        # Add only functional essentials and a nonempty first/last section.
+        if not goals:
+            goals = ["hero", "contact" if slug == "contact" else "content"]
+        if "hero" not in goals:
+            goals.insert(0, "hero")
+        else:
+            goals = ["hero"] + [x for x in goals if x != "hero"]
+        if slug == "contact" and "contact" not in goals and "booking" not in goals:
+            goals.append("contact")
+        # A store homepage requires a meaningful product showcase. This is a
+        # semantic requirement; the Creative Director still writes its content
+        # and chooses the composition instead of receiving fixed fallback copy.
+        if slug == "home" and (
+            "ecommerce" in brief.site_type.casefold()
+            or "магазин" in brief.primary_goal.casefold()
+            or "shop" in brief.site_type.casefold()
+        ) and "products" not in goals:
+            goals.insert(max(1, len(goals) - (1 if "cta" in goals else 0)), "products")
+        if slug != "contact" and "cta" not in goals:
+            goals.append("cta")
         if slug == "contact" and any(x in {"forms", "booking"} or "форм" in x.lower() or "запис" in x.lower() for x in brief.requirements):
             if "booking" not in goals:
                 goals.append("booking")
@@ -215,6 +225,12 @@ def _normalize_architecture(brief: ProjectBrief, architecture: ArchitectureBundl
     if brief.renderer in {"elementor", "auto"}:
         baseline_capabilities.append(CapabilityRequirement(
             capability="page_builder_elementor", reason="Selected renderer is Elementor", priority="required"
+        ))
+    if ("ecommerce" in brief.site_type.casefold()
+        or "shop" in brief.site_type.casefold()
+        or any(p.slug == "shop" for p in pages)):
+        baseline_capabilities.append(CapabilityRequirement(
+            capability="ecommerce", reason="Site architecture includes a store or WooCommerce Shop archive", priority="required"
         ))
     if any("booking" in p.section_goals for p in pages):
         baseline_capabilities.append(CapabilityRequirement(
@@ -672,7 +688,10 @@ def compile_build_plan(
             rationale="Configure the basic WooCommerce store",
         ))
 
-    ecommerce_requested = any(p.plugin_slug == "woocommerce" for p in app_spec.plugin_plan) or "ecommerce" in app_spec.required_capabilities
+    ecommerce_requested = (any(p.plugin_slug == "woocommerce" for p in app_spec.plugin_plan)
+                           or "ecommerce" in app_spec.required_capabilities
+                           or (any(p.slug == "shop" for p in app_spec.pages)
+                               and bool(snapshot.plugin_state("woocommerce") and snapshot.plugin_state("woocommerce").get("active"))))
     if ecommerce_requested:
         for product_name in safe_demo_products(user_request):
             actions.append(BuildAction(
@@ -1025,6 +1044,8 @@ HINTS: dict[str, str] = {
     "ProjectBrief": "Keys: site_type, language, primary_goal, secondary_goals[], audiences[], tone, renderer, requested_pages[], requirements[], known_facts{}, missing_facts[], constraints[].",
     "ArchitectureBundle": "Keys: site_title, tagline, theme_slug, pages[{name,slug,purpose,search_intent,primary_cta,primary_cta_url,section_goals[]}], capabilities[{capability,reason,priority}], content_types[], content_matrix[{page_slug,page_goal,search_intent,primary_cta,secondary_cta,key_messages[],internal_links[]}], security_requirements[], performance_requirements[].",
     "ExperienceSpec": "Keys: generative_design{candidates[2-3]{id,name,narrative,composition,typographic_contrast,visual_motif},selected_direction_id,selection_reason,page_layouts[{page_slug,sections[{section_index,composition:split|stacked|centered|offset,media_position:start|end,text_width_pct:35..70,max_width:720..1440,vertical_space:36..168,art_ratio:square|portrait|landscape|wide,motif:none|halo|lines|frame|gradient,card_columns:1..4,heading_emphasis:calm|balanced|dramatic,card_presentation:grid|bento|list,surface_treatment:canvas|tinted|bordered,content_alignment:start|center,visual_treatment:abstract|typography|media,accent_detail:none|rule|index}]}]}, design_direction, design_system{primary,accent,background,surface,text,muted,heading_font,body_font,container_width,section_spacing,radius}, component_rules[], pages[{page_name,page_slug,page_goal,sections[],section_specs[{section_type,component_key,section_goal,eyebrow,heading,body,items[],cta_label,cta_url,style_variant}],content_guidance[],responsive_notes[],accessibility_notes[],seo{slug,title,meta_description,h1,internal_link_targets[],schema_types[]}}].",
+    "CreativeFoundation": "Return design_direction, design_system, candidates (2-3 distinct proposals), selected_direction_id and selection_reason. No page copy, no page layouts.",
+    "CreativePage": "Return page_slug, sections[{kind,headline,body,eyebrow,items,cta_label,cta_url,style_variant,composition,visual_treatment,surface_treatment,card_presentation,heading_emphasis,motif,content_alignment,media_position,art_ratio,max_width,text_width_pct,card_columns,vertical_space,accent_detail}], seo_title, meta_description. FIRST section kind=hero. All headlines and body are REQUIRED and original. No separate section_specs or generative_design.",
     "BuildPlan": "Keys: actions[{ability,parameters{},rationale}]. Keep actions minimal.",
     "QualityReport": "Keys: passed, summary, checks_performed[], issues[{id,category,severity,description,responsible_agent,suggested_fix}].",
 }
@@ -1072,7 +1093,12 @@ class OpenAIAgentRuntime(AgentRuntime):
     async def _run_typed(self, key: str, payload: dict[str, Any] | str, output_model: type[TModel]) -> TModel:
         payload_text = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
         hint = HINTS.get(output_model.__name__, f"Return JSON matching {output_model.__name__}.")
-        first_prompt = payload_text + "\n\nOUTPUT: one JSON object only. " + hint
+        # Creative sub-artifacts are small enough for their exact schema to be
+        # included on the FIRST attempt (unlike the oversized ExperienceSpec).
+        if output_model in {CreativeFoundation, CreativePage}:
+            first_prompt = payload_text + "\n\nOUTPUT: one JSON object only. " + hint + "\nEXACT JSON SCHEMA: " + _compact_schema(output_model)
+        else:
+            first_prompt = payload_text + "\n\nOUTPUT: one JSON object only. " + hint
         first = await self._run_raw(key, first_prompt)
         try:
             return _validate_agent_json(first, output_model)
@@ -1089,7 +1115,19 @@ class OpenAIAgentRuntime(AgentRuntime):
             try:
                 return _validate_agent_json(second, output_model)
             except (ValueError, ValidationError) as second_exc:
-                raise RuntimeError(f"{self.agents[key].name} returned invalid JSON twice: {second_exc}") from second_exc
+                # Do not flood the WordPress UI with 12+ Pydantic input dumps.
+                # Report the actual missing paths and ask the user to check
+                # budget/model compatibility instead of hiding the failure.
+                if isinstance(second_exc, ValidationError):
+                    fields = [".".join(str(bit) for bit in e["loc"]) + ": " + e["type"]
+                              for e in second_exc.errors()[:10]]
+                    detail = "; ".join(fields)
+                else:
+                    detail = str(second_exc)[:300]
+                raise RuntimeError(
+                    f"{self.agents[key].name} output schema error after one focused retry "
+                    f"({output_model.__name__}): {detail}. WordPress deployment was not started."
+                ) from second_exc
 
     async def orchestrate(self, user_request: str, renderer: Renderer) -> ProjectBrief:
         return await self._run_typed("orchestrator", {"request": user_request, "renderer": renderer}, ProjectBrief)
@@ -1098,11 +1136,66 @@ class OpenAIAgentRuntime(AgentRuntime):
         return await self._run_typed("architect", {"project_brief": brief.model_dump(mode="json"), "site_preflight": site_summary}, ArchitectureBundle)
 
     async def design(self, brief: ProjectBrief, architecture: ArchitectureBundle) -> ExperienceSpec:
-        return await self._run_typed("design", {
+        """One Creative Director, two bounded tasks: direction then each page.
+
+        A single oversized ExperienceSpec was repeatedly emitted with missing
+        fields. Breaking it into small typed artifacts prevents cross-schema
+        contamination and makes retries page-local instead of site-wide.
+        """
+        needed = 1 + len(architecture.pages)
+        remaining = self.budget.state().remaining_calls
+        if remaining < needed:
+            raise RuntimeError(
+                f"Creative Director requires at least {needed} remaining model calls "
+                f"for {len(architecture.pages)} pages, but only {remaining} remain. "
+                "Increase MAX_LLM_CALLS or request fewer pages. No WordPress changes were made."
+            )
+        foundation = await self._run_typed("design", {
+            "task": "creative_foundation_only",
             "project_brief": brief.model_dump(mode="json"),
-            "architecture": architecture.model_dump(mode="json"),
-            "instruction": "Create coherent site-wide content and design. Do not repeat upstream JSON in prose.",
-        }, ExperienceSpec)
+            "site_title": architecture.site_title,
+            "page_map": [{"slug": p.slug, "purpose": p.purpose, "section_goals": p.section_goals} for p in architecture.pages],
+            "constraints": [
+                "Propose TWO OR THREE genuinely distinct creative concepts. Choose one.",
+                "Only verified facts from project_brief may appear in copy.",
+                "Do not write pages or sections in this step.",
+                "Use a cohesive accessible design system; colors must be #RRGGBB.",
+                "The creative_seed is private and only directs variety.",
+            ],
+        }, CreativeFoundation)
+        produced: list[CreativePage] = []
+        used_headings: list[str] = []
+        for intent in architecture.pages:
+            page = await self._run_typed("design", {
+                "task": "creative_page_content_and_layout_only",
+                "page": intent.model_dump(mode="json"),
+                "site_title": architecture.site_title,
+                "brand_name": architecture.site_title,
+                "language": brief.language,
+                "project_goals": [brief.primary_goal, *brief.secondary_goals],
+                "verified_facts": brief.known_facts,
+                "missing_facts": brief.missing_facts,
+                "constraints": brief.constraints,
+                "selected_direction": next(c.model_dump(mode="json") for c in foundation.candidates
+                                           if c.id == foundation.selected_direction_id),
+                "design_system": foundation.design_system.model_dump(mode="json"),
+                "site_page_urls": ["/" if p.slug == "home" else f"/{p.slug}/" for p in architecture.pages],
+                "headlines_already_used": used_headings[-24:],
+                "rules": [
+                    "Return only ONE page. Do not return ExperienceSpec, design_system or section_specs.",
+                    "Every section must have kind, nonempty original headline, useful body and five design choices.",
+                    "Place hero first; cover the exact required section_goals without invented sections.",
+                    "Avoid generic repeated sales language and repeated headings.",
+                    "Use CTA URLs only for existing pages or safe #anchors, never fabricated URLs.",
+                    "Produce distinctly tailored content and visual rhythm; all output remains editable in Elementor.",
+                    "Never claim unverified people, awards, ingredients, prices, ratings, addresses, or reviews.",
+                ],
+            }, CreativePage)
+            if page.page_slug != intent.slug:
+                raise ValueError(f"Creative Director returned slug {page.page_slug!r} for expected page {intent.slug!r}")
+            produced.append(page)
+            used_headings.extend(section.headline for section in page.sections)
+        return compose_experience(architecture, foundation, produced)
 
     async def build(self, implementation_manifest: dict[str, Any]) -> BuildPlan:
         return await self._run_typed("builder", implementation_manifest, BuildPlan)

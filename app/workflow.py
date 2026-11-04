@@ -360,6 +360,10 @@ class MultiAgentWorkflow:
 
         run.experience_spec = await self.agents.design(run.project_brief, run.architecture)
         run.experience_spec = reconcile_experience(run.project_brief, run.architecture, run.experience_spec)
+        # Same bounded heading deduplication as WordPress Pull. Legacy local
+        # workflow should not regress when a required product section is added.
+        from .editorial_repair import repair_duplicate_headings
+        run.experience_spec, _ = repair_duplicate_headings(run.experience_spec)
         run.status = "specified"
 
         baseline = compile_build_plan(run.application_spec, run.experience_spec, run.site_snapshot, renderer)

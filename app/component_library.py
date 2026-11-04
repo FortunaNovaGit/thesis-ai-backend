@@ -175,16 +175,10 @@ def _editorial_product_card(title: str, body: str, ds: DesignSystem, index: int,
         _widget("heading", {"title": f"{index + 1:02d}", "header_size": "div", "title_color": ds.accent,
                             "typography_typography": "custom", "typography_font_family": ds.heading_font,
                             "typography_font_size": _px(54)}),
-        _widget("heading", {"title": "КОЛЕКЦІЯ", "header_size": "div", "title_color": ds.text,
-                            "typography_typography": "custom", "typography_font_family": ds.body_font,
-                            "typography_font_size": _px(13)}),
     ]), {"content_width": "full", "min_height": _px(205), "justify_content": "center",
         "align_items": "center", "padding": _box(0,0,0,0) if media else _box(20,20,20,20),
         "css_classes": "tai-product-art-photo" if media else f"tai-product-art tai-product-art-{index % 4}"})
-    label = _widget("heading", {"title": "ДЕМОНСТРАЦІЙНА КАРТКА", "header_size": "div", "title_color": ds.accent,
-                               "typography_typography": "custom", "typography_font_family": ds.body_font,
-                               "typography_font_size": _px(11), "typography_font_weight": "700"})
-    elements = [preview, label, _heading(title, ds.text, ds, level="h3", size=24)]
+    elements = [preview, _heading(title, ds.text, ds, level="h3", size=24)]
     if body:
         elements.append(_text(body, ds.muted, ds, size=15))
     return _container(elements, {
@@ -211,9 +205,15 @@ def _split_items(items: list[str]) -> list[tuple[str, str]]:
 
 def _colors(section: SectionContentSpec, ds: DesignSystem) -> tuple[str, str, str]:
     if section.style_variant == "dark":
-        return ds.text, "#FFFFFF", "#DCE6EF"
+        # Palette-aware dark section; white type on a light background was
+        # previously possible when AI selected an inverted global palette.
+        from .design_safety import luminance
+        bg = ds.text if luminance(ds.text) < .18 else (ds.background if luminance(ds.background) < .18 else ds.primary)
+        ink = _readable_ink(bg)
+        return bg, ink, ink
     if section.style_variant == "accent":
-        return ds.primary, "#FFFFFF", "#EAF4FA"
+        ink = _readable_ink(ds.primary)
+        return ds.primary, ink, ink
     if section.style_variant == "soft":
         return ds.surface, ds.text, ds.muted
     return ds.background, ds.text, ds.muted
@@ -239,7 +239,7 @@ def _intro(section: SectionContentSpec, ds: DesignSystem, *, h1: bool = False) -
         out.append(_widget("heading", {
             "title": html.escape(section.eyebrow.upper(), quote=False),
             "header_size": "div",
-            "title_color": ds.accent if section.style_variant not in {"accent", "dark"} else "#FFFFFF",
+            "title_color": ds.accent if section.style_variant not in {"accent", "dark"} else title_color,
             "typography_typography": "custom",
             "typography_font_family": ds.body_font,
             "typography_font_size": _px(13),
@@ -384,7 +384,7 @@ def cta(section: SectionContentSpec, ds: DesignSystem) -> dict[str, Any]:
     inner = _container(body, {
         "content_width": "boxed", "align_items": "center", "padding": _box(6, 6, 6, 6), "gap": _px(18),
     })
-    section = section.model_copy(update={"style_variant": "dark"})
+    # Honor Creative Director surface: do not force all CTA sections dark.
     return _section_shell(section, [inner], ds)
 
 
