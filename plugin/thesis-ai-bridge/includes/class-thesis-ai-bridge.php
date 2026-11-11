@@ -132,6 +132,11 @@ final class Thesis_AI_Bridge {
             plugins_url('assets/front.css', THESIS_AI_BRIDGE_FILE),
             [], THESIS_AI_BRIDGE_VERSION
         );
+        wp_enqueue_style(
+            'thesis-ai-visual-composer',
+            plugins_url('assets/visual-composer.css', THESIS_AI_BRIDGE_FILE),
+            ['thesis-ai-premium-visuals'], THESIS_AI_BRIDGE_VERSION
+        );
     }
 
     /**
@@ -312,13 +317,15 @@ final class Thesis_AI_Bridge {
     private static function do_media_inventory(): array {
         $state = get_option('thesis_ai_bridge_ui_state', []);
         $preferred = is_array($state) ? absint($state['brief']['hero_image_id'] ?? 0) : 0;
+        $secondary = is_array($state) ? absint($state['brief']['hero_secondary_image_id'] ?? 0) : 0;
         $items = get_posts(['post_type' => 'attachment', 'post_status' => 'inherit',
             'post_mime_type' => 'image', 'posts_per_page' => 25,
             'orderby' => 'date', 'order' => 'DESC']);
         // The admin-selected image may be older than the 25 most recent files.
-        if ($preferred && wp_attachment_is_image($preferred)) {
-            $selected = get_post($preferred);
-            if ($selected instanceof WP_Post && !in_array($preferred, wp_list_pluck($items, 'ID'))) {
+        foreach (array_unique(array_filter([$preferred, $secondary])) as $chosen) {
+            if (!wp_attachment_is_image($chosen)) { continue; }
+            $selected = get_post($chosen);
+            if ($selected instanceof WP_Post && !in_array($chosen, wp_list_pluck($items, 'ID'), true)) {
                 array_unshift($items, $selected);
             }
         }
@@ -328,6 +335,7 @@ final class Thesis_AI_Bridge {
             if (!$url || !str_starts_with((string)$url, 'https://')) { continue; }
             $media[] = ['id' => (int)$post->ID, 'url' => (string)$url,
                 'preferred_home_hero' => (int)$post->ID === $preferred,
+                'preferred_home_hero_secondary' => (int)$post->ID === $secondary,
                 'alt' => (string)get_post_meta($post->ID, '_wp_attachment_image_alt', true),
                 'title' => (string)$post->post_title,
                 'caption' => (string)$post->post_excerpt];

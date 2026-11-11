@@ -8,6 +8,7 @@ from typing import Any
 
 from .models import DesignSystem, PageExperienceSpec, SectionContentSpec, PageLayoutSpec, SectionLayoutSpec
 from .generative_design import section_layout
+from .visual_composer import resolve_scene, scene_classes
 
 
 def _validated_media_url(asset: dict[str, Any]) -> str:
@@ -54,6 +55,20 @@ def choose_page_media(page: PageExperienceSpec, media: list[dict[str, Any]]) -> 
     text = " ".join([page.page_name, page.page_goal] +
                     [" ".join([sec.heading, sec.body]) for sec in page.section_specs])
     return choose_matching_media(text, media)
+
+
+def choose_secondary_page_media(page: PageExperienceSpec, media: list[dict[str, Any]], primary: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Only the site owner's explicitly chosen second Hero image is eligible.
+
+    Never take an arbitrary product photo from the Media Library to fill a collage.
+    """
+    if page.page_slug != "home" or primary is None:
+        return None
+    for item in media:
+        if (item.get("preferred_home_hero_secondary") and _validated_media_url(item)
+                and item.get("id") != primary.get("id")):
+            return item
+    return None
 
 
 def _image_widget(media: dict[str, Any]) -> dict[str, Any]:
@@ -267,7 +282,7 @@ def _intro(section: SectionContentSpec, ds: DesignSystem, *, h1: bool = False) -
     return out
 
 
-def hero(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] | None = None) -> dict[str, Any]:
+def hero(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] | None = None, secondary_media: dict[str, Any] | None = None) -> dict[str, Any]:
     left_elements = _intro(section, ds, h1=True)
     if section.cta_label:
         left_elements.append(_button(section.cta_label, section.cta_url or "#", ds, accent=section.style_variant == "dark"))
@@ -282,8 +297,14 @@ def hero(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] | 
     })
 
     if media:
-        # Only media already attached to this WordPress site can become a real image.
-        right = _container([_image_widget(media)], {
+        # Every visual is independently editable. No LLM-supplied image URLs.
+        visual_children = [_image_widget(media)]
+        if secondary_media and secondary_media.get("id") != media.get("id") and _validated_media_url(secondary_media):
+            visual_children.append(_container([_image_widget(secondary_media)], {
+                "content_width": "full", "padding": _box(0, 0, 0, 0),
+                "css_classes": "tai-hero-photo-secondary",
+            }))
+        right = _container(visual_children, {
             "content_width": "full", "width": _pct(100), "width_mobile": _pct(100),
             "padding": _box(0, 0, 0, 0), "css_classes": "tai-hero-photo",
         })
@@ -495,6 +516,7 @@ def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem, media: li
     if not specs:
         specs = [SectionContentSpec(section_type="content", heading=page.page_name, body=page.page_goal)]
     selected_image = choose_page_media(page, media or [])
+    secondary_image = choose_secondary_page_media(page, media or [], selected_image)
     # Defense in depth for direct compiler callers bypassing the planning gate.
     # Unique, valid Creative Director headings pass through unchanged.
     seen_headings: set[str] = set()
@@ -514,7 +536,16 @@ def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem, media: li
             section = section.model_copy(update={"section_type": "hero"})
         renderer = COMPONENTS.get(section_type, simple_content)
         if section_type == "hero":
-            element = hero(section, ds, selected_image)
+            # A typography-only scene must not render an unused photo layer.
+            requested_layout = section_layout(layout, index)
+            if requested_layout is not None:
+                resolved_scene = resolve_scene(requested_layout,
+                    int(selected_image is not None) + int(secondary_image is not None))
+                element = hero(section, ds,
+                    selected_image if resolved_scene.media_count else None,
+                    secondary_image if resolved_scene.media_count == 2 else None)
+            else:
+                element = hero(section, ds, selected_image)
         elif section_type in {"products", "services", "benefits", "trust", "team", "process", "stats"}:
             element = cards(section, ds, selected_image, live_catalog=live_catalog,
                             product_names=product_names, h1=(index == 0), product_media=media)
@@ -532,7 +563,27 @@ def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem, media: li
             # full-height panel. This geometric guardrail preserves AI content.
             section_spec = section_spec.model_copy(update={"vertical_space": 88})
         if section_spec is not None:
+            if section_type == "hero":
+                resolved_scene = resolve_scene(section_spec,
+                    int(selected_image is not None) + int(secondary_image is not None))
+                # The earlier typography trim is a legacy layout rule. Real
+                # owner-selected media must not be pruned by an unrelated
+                # visual_treatment text hint if the scene actually uses it.
+                if resolved_scene.media_count and section_spec.visual_treatment == "typography":
+                    section_spec = section_spec.model_copy(update={"visual_treatment": "media"})
             _apply_generative_layout(element, section_spec, page_slug=page.page_slug, index=index)
+            if section_type == "hero":
+                media_count = int(selected_image is not None) + int(secondary_image is not None)
+                scene = resolve_scene(section_spec, media_count)
+                element["settings"]["css_classes"] += " " + scene_classes(section_spec, scene)
+                # Structural hygiene: don't render second image for single-media modes.
+                if scene.media_count < 2:
+                    for grid in element.get("elements", []):
+                        if "tai-hero-grid" not in grid.get("settings", {}).get("css_classes", ""):
+                            continue
+                        for media_container in grid.get("elements", [])[1:]:
+                            media_container["elements"] = [child for child in media_container.get("elements", [])
+                                if "tai-hero-photo-secondary" not in child.get("settings", {}).get("css_classes", "")]
         elements.append(element)
     return elements
 

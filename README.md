@@ -48,3 +48,9 @@ An offline test is not a live OpenAI/Render/EasyWP acceptance run. Never expose 
 ## v0.9.4 quality-first staging update
 
 See `CHANGELOG_V0.9.4_UA.md` and `INSTALL_V0.9.4_UA.md`. This retains five agents, WordPress Pull, and the security/policy baseline. It adds media selection from the existing WordPress library, stricter real product identification, full-bleed layout regressions and offline browser QA. The rendering remains Elementor V3 native containers/widgets, not V4 MCP. Do not claim production readiness or visual-wow guarantees from offline tests alone.
+
+## v0.10.0 Visual Composer preview
+
+New `app/visual_composer.py`, constrained `hero_scene`/`hero_height`/`hero_motion` design controls and `plugin/thesis-ai-bridge/assets/visual-composer.css` add five different editable Elementor Hero layouts. Existing five-agent flow, WordPress Pull, Pydantic guards and draft-first behavior remain. The WordPress brief can supply one or two **real WordPress image attachments** for the Hero.
+
+See `CHANGELOG_V0.10.0_UA.md` and `INSTALL_V0.10.0_UA.md`. Offline `qa/visual_composer_smoke.py` is *not* live Elementor or EasyWP proof. Do not infer real-world visual quality or production readiness from it.

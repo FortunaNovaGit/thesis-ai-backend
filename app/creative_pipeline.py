@@ -69,6 +69,9 @@ class CreativeSection(BaseModel):
     card_columns: int = Field(default=3, ge=1, le=4)
     vertical_space: int = Field(default=88, ge=36, le=168)
     accent_detail: Literal["none", "rule", "index"] = "none"
+    hero_scene: Literal["auto", "editorial", "cinematic", "collage", "poster", "typographic"] = "auto"
+    hero_motion: Literal["none", "subtle"] = "none"
+    hero_height: Literal["standard", "tall", "fullscreen"] = "standard"
 
 
 class CreativePage(BaseModel):
@@ -185,6 +188,9 @@ def compose_experience(
                 card_columns=section.card_columns,
                 vertical_space=section.vertical_space,
                 accent_detail=section.accent_detail,
+                hero_scene=section.hero_scene,
+                hero_motion=section.hero_motion,
+                hero_height=section.hero_height,
                 max_width=section.max_width,
             ))
         seo = SeoSpec(

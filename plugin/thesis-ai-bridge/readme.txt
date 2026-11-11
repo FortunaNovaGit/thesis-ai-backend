@@ -3,14 +3,14 @@ Contributors: thesis-prototype
 Tags: ai, elementor, abilities-api, automation, wordpress
 Requires at least: 6.6
 Requires PHP: 8.0
-Stable tag: 0.9.4
+Stable tag: 0.10.0
 License: GPLv2 or later
 
 Controlled local WordPress execution layer for a five-agent master's thesis prototype.
 
 == Description ==
 
-Version 0.9.4 adds safe generative Elementor section geometry and responsive artwork while retaining the v0.8.5 WordPress Pull executor:
+Version 0.10.0 adds safe generative Elementor section geometry and responsive artwork while retaining the v0.8.5 WordPress Pull executor:
 
 * Five-role artifact pipeline: Orchestrator, Architect/Capability, Design/Content/SEO, deterministic WordPress Implementation, Quality/Security.
 * WordPress background worker continues builds even if the admin tab is refreshed, backgrounded or closed.
@@ -31,3 +31,7 @@ Version 0.9.4 adds safe generative Elementor section geometry and responsive art
 6. Keep the builder page open or return later; build state is persisted in WordPress.
 7. Review generated drafts in Elementor.
 8. Publish only after explicit administrator confirmation.
+
+== v0.10.0 Hero Visual Composer ==
+
+The WordPress Bridge now loads a scoped visual-composer.css stylesheet on AI-owned pages. It supports native Elementor editable Hero scenes selected by the Creative Director and an optional second WordPress attachment for owner-supplied collages. No arbitrary AI-generated HTML, CSS or JavaScript is executed. This is a staging preview; production quality must be verified in the actual editor.

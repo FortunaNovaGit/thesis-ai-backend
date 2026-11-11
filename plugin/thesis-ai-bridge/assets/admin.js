@@ -48,40 +48,41 @@
   }
   [prompt,renderer,allowPlugins,allowSetup,...briefFields].filter(Boolean).forEach(el=>el.addEventListener(el===prompt || el.tagName==='INPUT' || el.tagName==='TEXTAREA'?'input':'change',scheduleSave));
   updateCounter();
-  // Optional trusted WordPress Media Library picker. Only attachment IDs are
-  // persisted. The server revalidates ownership/type before returning the URL.
-  const selectHero = $('#tai-hero-media-select');
-  const clearHero = $('#tai-hero-media-clear');
-  const heroId = $('#tai-hero-media-id');
-  const heroLabel = $('#tai-hero-media-selection');
-  const heroThumb = $('#tai-hero-media-thumb');
-  if(selectHero && heroId && window.wp && wp.media){
+  // Two separately editable owner-selected images; IDs validated by WordPress.
+  function setupMediaPicker(prefix, title){
+    const select=$('#'+prefix+'-select');
+    const clear=$('#'+prefix+'-clear');
+    const id=$('#'+prefix+'-id');
+    const label=$('#'+prefix+'-selection');
+    const thumb=$('#'+prefix+'-thumb');
+    if(!id) return;
     let frame;
-    selectHero.addEventListener('click',()=>{
-      if(!frame){
-        frame=wp.media({title:'Обрати головне фото сайту',button:{text:'Використати фото'},library:{type:'image'},multiple:false});
-        frame.on('select',()=>{
-          const item=frame.state().get('selection').first();
-          if(!item) return;
-          const attachment=item.toJSON();
-          heroId.value=String(attachment.id||'');
-          if(heroLabel) heroLabel.textContent=attachment.title||('Зображення #'+heroId.value);
-          const thumbnail=(attachment.sizes&&attachment.sizes.thumbnail&&attachment.sizes.thumbnail.url)||attachment.url;
-          if(heroThumb && thumbnail){heroThumb.src=thumbnail;heroThumb.hidden=false;}
-          scheduleSave();
-        });
-      }
-      frame.open();
-    });
-  }
-  if(clearHero && heroId){
-    clearHero.addEventListener('click',()=>{
-      heroId.value='';
-      if(heroLabel) heroLabel.textContent='Фото не обрано';
-      if(heroThumb){heroThumb.hidden=true;heroThumb.removeAttribute('src');}
+    if(select && window.wp && wp.media){
+      select.addEventListener('click',()=>{
+        if(!frame){
+          frame=wp.media({title,button:{text:'Використати фото'},library:{type:'image'},multiple:false});
+          frame.on('select',()=>{
+            const item=frame.state().get('selection').first();
+            if(!item) return;
+            const attachment=item.toJSON();
+            id.value=String(attachment.id||'');
+            if(label) label.textContent=attachment.title||('Зображення #'+id.value);
+            const url=(attachment.sizes&&attachment.sizes.thumbnail&&attachment.sizes.thumbnail.url)||attachment.url;
+            if(thumb && url){thumb.src=url;thumb.hidden=false;}
+            scheduleSave();
+          });
+        }
+        frame.open();
+      });
+    }
+    if(clear) clear.addEventListener('click',()=>{
+      id.value=''; if(label) label.textContent='Фото не обрано';
+      if(thumb){thumb.hidden=true;thumb.removeAttribute('src');}
       scheduleSave();
     });
   }
+  setupMediaPicker('tai-hero-media','Обрати головне фото сайту');
+  setupMediaPicker('tai-secondary-media','Обрати друге фото для Hero-колажу');
 
   const stageToStep = stage => {
     stage=(stage||'').toLowerCase();

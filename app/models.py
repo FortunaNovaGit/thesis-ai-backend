@@ -255,6 +255,10 @@ class SectionLayoutSpec(BaseModel):
     content_alignment: Literal["start", "center"] = "start"
     visual_treatment: Literal["abstract", "typography", "media"] = "abstract"
     accent_detail: Literal["none", "rule", "index"] = "none"
+    # v0.10 visual composition: AI selects semantics, compiler owns CSS.
+    hero_scene: Literal["auto", "editorial", "cinematic", "collage", "poster", "typographic"] = "auto"
+    hero_motion: Literal["none", "subtle"] = "none"
+    hero_height: Literal["standard", "tall", "fullscreen"] = "standard"
 
 
 class PageLayoutSpec(BaseModel):

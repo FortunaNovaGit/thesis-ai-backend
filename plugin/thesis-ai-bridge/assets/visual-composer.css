@@ -1,0 +1,177 @@
+/* Thesis AI v0.10.0 — deterministic Elementor Visual Composer (no remote CSS).
+   Every selector is scoped to pages created by this plugin. Any imagery is a
+   WordPress attachment exposed as an independent native Elementor Image widget. */
+body.thesis-ai-generated .elementor .tai-vc {
+  --tai-vc-stage: clamp(540px, 60vw, 760px);
+  --tai-vc-ink: var(--tai-text,#261d1c);
+  --tai-vc-paper: var(--tai-bg,#f8f3ed);
+  isolation:isolate; overflow:visible!important;
+}
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-height-tall {--tai-vc-stage:clamp(650px,70vw,850px)}
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-height-fullscreen {--tai-vc-stage:min(850px,92svh)}
+body.thesis-ai-generated .elementor .tai-vc .tai-hero-grid,
+body.thesis-ai-generated .elementor .tai-vc .tai-hero-copy,
+body.thesis-ai-generated .elementor .tai-vc .tai-hero-photo {min-width:0!important}
+body.thesis-ai-generated .elementor .tai-vc .tai-hero-grid {position:relative!important;isolation:isolate;gap:clamp(20px,4vw,64px)!important}
+body.thesis-ai-generated .elementor .tai-vc .tai-hero-copy {position:relative!important;z-index:3!important;}
+body.thesis-ai-generated .elementor .tai-vc .tai-hero-copy h1.elementor-heading-title {
+  font-size:clamp(2.6rem,4.6vw,5.8rem)!important;
+  line-height:.96!important;letter-spacing:-.055em!important;
+  max-width:19ch!important;text-wrap:balance;overflow-wrap:normal!important;word-break:normal!important;hyphens:none!important;
+}
+body.thesis-ai-generated .elementor .tai-vc .tai-hero-copy p{max-width:51ch;line-height:1.6}
+body.thesis-ai-generated .elementor .tai-vc .tai-hero-photo{position:relative!important;overflow:hidden;min-height:350px;}
+body.thesis-ai-generated .elementor .tai-vc .tai-hero-photo>.elementor-widget-image {width:100%;height:100%}
+body.thesis-ai-generated .elementor .tai-vc .tai-hero-photo>.elementor-widget-image .elementor-widget-container,
+body.thesis-ai-generated .elementor .tai-vc .tai-hero-photo>.elementor-widget-image img {
+  width:100%!important;height:100%!important;max-height:none!important;
+  object-fit:cover!important;display:block;
+}
+/* Editorial overlap: a deliberate magazine-cover overlap, never a two-column card. */
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-editorial .tai-hero-grid{
+  display:grid!important;grid-template-columns:minmax(0,.95fr) minmax(0,1.05fr)!important;
+  min-height:var(--tai-vc-stage);align-items:center!important;
+}
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-editorial .tai-hero-copy{
+  width:calc(100% + clamp(22px,7vw,110px))!important;
+  max-width:800px!important;margin-right:calc(-1 * clamp(22px,7vw,110px))!important;
+  padding:clamp(26px,4.5vw,76px)!important;background:var(--tai-vc-paper)!important;
+  box-shadow:0 22px 70px #00000012;
+}
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-editorial .tai-hero-copy :is(h1.elementor-heading-title,p){color:var(--tai-vc-ink)!important}
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-editorial .tai-hero-photo{height:min(740px,72vw)!important;min-height:490px!important;z-index:1}
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-editorial .tai-hero-photo:after{
+  content:"";position:absolute;inset:18px;border:1px solid #ffffff88;pointer-events:none;
+}
+/* Cinematic: single authentic photograph + opaque type panel (readable regardless of crop). */
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-cinematic .tai-hero-grid {
+  display:grid!important;grid-template-columns:minmax(0,1fr)!important;
+  min-height:var(--tai-vc-stage);max-width:1440px!important;
+  padding:clamp(22px,4vw,66px)!important;align-items:end!important;
+}
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-cinematic .tai-hero-photo{
+  position:absolute!important;inset:0!important;width:100%!important;height:100%!important;
+  max-height:none!important;aspect-ratio:auto!important;min-height:0!important;
+  border:0!important;border-radius:0!important;box-shadow:none!important;z-index:0;
+}
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-cinematic .tai-hero-photo:after{
+  content:"";position:absolute;inset:0;background:linear-gradient(90deg,#14100bbd,transparent 95%);pointer-events:none;
+}
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-cinematic .tai-hero-copy{
+  max-width:min(770px,86%)!important;width:auto!important;
+  padding:clamp(25px,4vw,66px)!important;background:#171411eb!important;
+  backdrop-filter:blur(5px);color:#fff!important;
+}
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-cinematic .tai-hero-copy :is(h1.elementor-heading-title,p){color:#fff!important}
+/* Collage: two real assets, independently editable. Secondary image floats on top. */
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-collage .tai-hero-grid{
+  display:grid!important;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr)!important;
+  min-height:var(--tai-vc-stage);align-items:center!important;
+}
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-collage .tai-hero-copy{
+  padding:clamp(18px,3.5vw,54px) clamp(10px,3vw,36px)!important;
+}
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-collage .tai-hero-photo{
+  height:clamp(460px,49vw,720px)!important;max-height:none!important;
+  overflow:visible!important;border-radius:0!important;box-shadow:none!important;
+}
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-collage .tai-hero-photo>.elementor-widget-image {
+  width:72%!important;height:80%!important;margin-left:auto;filter:drop-shadow(0 24px 36px #00000025);
+}
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-collage .tai-hero-photo .tai-hero-photo-secondary{
+  position:absolute!important;left:0!important;bottom:0!important;z-index:2;width:49%!important;
+  height:53%!important;padding:0!important;overflow:hidden!important;
+  border:clamp(7px,1vw,14px) solid var(--tai-vc-paper)!important;
+  box-shadow:0 22px 45px #0000002f;
+}
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-collage .tai-hero-photo .tai-hero-photo-secondary img {
+  width:100%!important;height:100%!important;object-fit:cover!important;
+}
+/* Poster: huge editorial headline with an inset photographic window. */
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-poster .tai-hero-grid{
+  display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,.64fr)!important;
+  min-height:var(--tai-vc-stage);align-items:end!important;
+}
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-poster .tai-hero-copy {
+  align-self:center!important;padding-block:clamp(40px,7vw,105px)!important;
+}
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-poster .tai-hero-copy h1.elementor-heading-title{
+  font-size:clamp(3.1rem,5.4vw,7rem)!important;max-width:14ch!important;
+}
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-poster .tai-hero-photo{
+  height:clamp(360px,48vw,670px)!important;max-height:none!important;
+  border-radius:45% 45% 3px 3px!important;
+}
+/* No media: intentional typographic installation, not a fake photo placeholder. */
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-typographic .tai-hero-grid{
+  display:grid!important;grid-template-columns:minmax(0,1fr)!important;
+  min-height:min(760px,var(--tai-vc-stage));align-items:center!important;
+}
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-typographic .tai-hero-copy{
+  max-width:1000px!important;padding:clamp(22px,4vw,68px)!important;
+  border-left:1px solid color-mix(in srgb,var(--tai-accent,#bd934c) 75%,transparent);
+}
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-typographic .tai-hero-copy h1.elementor-heading-title{
+  max-width:17ch!important;font-size:clamp(3.1rem,6.3vw,7.6rem)!important;
+}
+body.thesis-ai-generated .elementor .tai-vc.tai-scene-typographic .tai-hero-grid:after{
+  content:"";position:absolute;z-index:0;top:10%;right:0;width:min(24vw,280px);aspect-ratio:1;
+  border:1px solid color-mix(in srgb,var(--tai-accent,#bd934c) 45%,transparent);border-radius:50%;pointer-events:none;
+}
+@media (min-width:1121px){
+  body.thesis-ai-generated .elementor .tai-vc.tai-scene-motion-subtle .tai-hero-copy{animation:tai-vc-enter .75s both}
+  body.thesis-ai-generated .elementor .tai-vc.tai-scene-motion-subtle .tai-hero-photo{animation:tai-vc-enter 1.1s both}
+  @keyframes tai-vc-enter{from{opacity:.1;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+}
+@media(max-width:1120px){
+  body.thesis-ai-generated .elementor .tai-vc .tai-hero-grid{
+    display:grid!important;grid-template-columns:minmax(0,1fr)!important;min-height:0!important;
+  }
+  body.thesis-ai-generated .elementor .tai-vc .tai-hero-copy{
+    max-width:100%!important;width:100%!important;margin:0!important;
+    padding:clamp(16px,4vw,42px)!important;order:0!important;
+  }
+  body.thesis-ai-generated .elementor .tai-vc .tai-hero-photo{
+    position:relative!important;inset:auto!important;width:100%!important;
+    height:clamp(320px,62vw,530px)!important;min-height:0!important;
+    max-height:none!important;order:1!important;aspect-ratio:auto!important;
+  }
+  body.thesis-ai-generated .elementor .tai-vc.tai-scene-cinematic .tai-hero-photo{height:clamp(320px,62vw,530px)!important}
+  body.thesis-ai-generated .elementor .tai-vc.tai-scene-cinematic .tai-hero-copy{max-width:100%!important}
+  body.thesis-ai-generated .elementor .tai-vc.tai-scene-collage .tai-hero-photo>.elementor-widget-image{height:83%!important}
+  body.thesis-ai-generated .elementor .tai-vc.tai-scene-typographic .tai-hero-grid:after{display:none}
+}
+@media(max-width:600px){
+  body.thesis-ai-generated .elementor .tai-vc .tai-hero-grid{gap:20px!important;padding:0!important}
+  body.thesis-ai-generated .elementor .tai-vc .tai-hero-copy{padding:22px 6px!important}
+  body.thesis-ai-generated .elementor .tai-vc .tai-hero-copy h1.elementor-heading-title{
+    font-size:clamp(2.4rem,9.2vw,4.2rem)!important;max-width:100%!important;overflow-wrap:break-word!important;
+  }
+  body.thesis-ai-generated .elementor .tai-vc .tai-hero-photo{
+    height:clamp(260px,78vw,400px)!important;width:100%!important;
+  }
+  body.thesis-ai-generated .elementor .tai-vc.tai-scene-cinematic .tai-hero-copy{
+    padding:24px!important;background:#171411!important;
+  }
+  body.thesis-ai-generated .elementor .tai-vc.tai-scene-collage .tai-hero-photo .tai-hero-photo-secondary{
+    border-width:6px!important;
+  }
+  body.thesis-ai-generated .elementor .tai-vc.tai-scene-typographic .tai-hero-copy{border-left:0;border-top:1px solid var(--tai-accent,#bd934c)}
+}
+@media(prefers-reduced-motion:reduce){
+  body.thesis-ai-generated .elementor .tai-vc *{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+}
+/* The mobile override must match each scene's specificity; otherwise the
+   two-column desktop grid wins despite a generic @media rule. */
+@media(max-width:1120px){
+  body.thesis-ai-generated .elementor .tai-vc:is(.tai-scene-editorial,.tai-scene-cinematic,.tai-scene-collage,.tai-scene-poster) .tai-hero-grid{
+    grid-template-columns:minmax(0,1fr)!important;
+    min-height:0!important;
+  }
+  body.thesis-ai-generated .elementor .tai-vc.tai-scene-cinematic .tai-hero-photo{
+    position:relative!important;inset:auto!important;width:100%!important;
+  }
+  body.thesis-ai-generated .elementor .tai-vc.tai-scene-editorial .tai-hero-copy{
+    max-width:100%!important;width:100%!important;margin:0!important;
+  }
+}

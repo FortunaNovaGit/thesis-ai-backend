@@ -107,7 +107,7 @@ def test_preferred_hero_is_real_verified_wordpress_attachment():
 
 def test_media_inventory_uses_confirmed_wp_image_and_does_not_accept_user_url():
     php = (ROOT/'plugin/thesis-ai-bridge/includes/class-thesis-ai-bridge.php').read_text()
-    assert 'wp_attachment_is_image($preferred)' in php
+    assert 'wp_attachment_is_image($chosen)' in php
     assert "'preferred_home_hero' => (int)$post->ID === $preferred" in php
     assert 'wp_get_attachment_image_url($post->ID' in php
     admin = (ROOT/'plugin/thesis-ai-bridge/includes/class-thesis-ai-bridge-admin.php').read_text()

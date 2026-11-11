@@ -114,6 +114,16 @@ Editorial standards:
   Differentiation must be semantic, not a synonym swap or added section number.
 - NEVER emit a section lacking useful information merely to fill the requested count;
   if the inputs lack facts, write decision-useful guidance without inventing claims.
+- The first Hero must be a deliberately composed SCENE, not a generic copy/image row.
+  Hero scene controls: hero_scene=editorial (large type overlaps a photo),
+  cinematic (full-width photo with a legible solid copy panel), collage
+  (two separately editable, owner-provided images), poster (typographic
+  poster with inset photo), or typographic (no photo needed).
+  Choose a scene that fits available real images and brand storytelling;
+  each run should offer meaningful visual variation, not random decoration.
+  hero_height=standard|tall|fullscreen; hero_motion=none|subtle.
+  No photo supplied -> use typographic, never fabricate product imagery.
+  These are compositional tools, not 5 fixed site templates.
 - Build a distinctive editorial rhythm; select split/offset/centered/stacked
   and bento/list/grid ONLY when they fit the actual section content. Large
   typography and negative space beat invented product photographs.
