@@ -54,3 +54,13 @@ See `CHANGELOG_V0.9.4_UA.md` and `INSTALL_V0.9.4_UA.md`. This retains five agent
 New `app/visual_composer.py`, constrained `hero_scene`/`hero_height`/`hero_motion` design controls and `plugin/thesis-ai-bridge/assets/visual-composer.css` add five different editable Elementor Hero layouts. Existing five-agent flow, WordPress Pull, Pydantic guards and draft-first behavior remain. The WordPress brief can supply one or two **real WordPress image attachments** for the Hero.
 
 See `CHANGELOG_V0.10.0_UA.md` and `INSTALL_V0.10.0_UA.md`. Offline `qa/visual_composer_smoke.py` is *not* live Elementor or EasyWP proof. Do not infer real-world visual quality or production readiness from it.
+
+## v0.11.0 Opt-in Media Pipeline
+
+See [INSTALL_V0.11.0_UA.md](INSTALL_V0.11.0_UA.md) and [CHANGELOG_V0.11.0_UA.md](CHANGELOG_V0.11.0_UA.md).
+
+- Default `ENABLE_IMAGE_GENERATION=false`. In the WP brief, choose `reuse_only` to avoid paid image calls.
+- With explicit admin consent and backend `ENABLE_IMAGE_GENERATION=true`, generate up to 3 editorial concepts **after the normal content quality gate**.
+- WP Pull downloads generated WebP into the Media Library and the backend **recompiles only the deterministic Elementor plan**, without rerunning text agents.
+- PostgreSQL is required for durable media tasks; only a single backend worker is tested. No product photography or unverifiable product claims.
+- Generated AI concept media is NOT the actual inventory photography and is never assigned automatically to WooCommerce product records.

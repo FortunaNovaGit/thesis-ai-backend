@@ -175,3 +175,12 @@ body.thesis-ai-generated .elementor .tai-vc.tai-scene-typographic .tai-hero-grid
     max-width:100%!important;width:100%!important;margin:0!important;
   }
 }
+
+/* v0.11 — real AI editorial image widgets, scoped to AI-owned Elementor pages. */
+body.thesis-ai-generated .elementor .tai-editorial-media {width:100%;max-width:100%;overflow:hidden;border-radius:var(--tai-radius,16px);position:relative;}
+body.thesis-ai-generated .elementor .tai-editorial-media .elementor-widget-image img {display:block;width:100%;height:auto;max-height:650px;object-fit:cover;}
+body.thesis-ai-generated .elementor .tai-editorial-media-collection {margin:0 0 clamp(1rem,3vw,2.5rem);}
+body.thesis-ai-generated .elementor .tai-editorial-media-story {margin-top:clamp(1.5rem,3vw,3rem);}
+@media (max-width:767px){
+  body.thesis-ai-generated .elementor .tai-editorial-media .elementor-widget-image img{max-height:420px;object-fit:cover;}
+}

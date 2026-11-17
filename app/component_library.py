@@ -52,9 +52,14 @@ def choose_page_media(page: PageExperienceSpec, media: list[dict[str, Any]]) -> 
         for item in media:
             if item.get("preferred_home_hero") and _validated_media_url(item):
                 return item
+        for item in media:
+            if item.get("ai_generated_role") == "hero" and _validated_media_url(item):
+                return item
     text = " ".join([page.page_name, page.page_goal] +
                     [" ".join([sec.heading, sec.body]) for sec in page.section_specs])
-    return choose_matching_media(text, media)
+    # AI concepts are assigned explicitly by role. Never repurpose an
+    # illustration of a collection as if it were a genuine product photograph.
+    return choose_matching_media(text, [m for m in media if not m.get("ai_generated_role")])
 
 
 def choose_secondary_page_media(page: PageExperienceSpec, media: list[dict[str, Any]], primary: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -68,6 +73,9 @@ def choose_secondary_page_media(page: PageExperienceSpec, media: list[dict[str, 
         if (item.get("preferred_home_hero_secondary") and _validated_media_url(item)
                 and item.get("id") != primary.get("id")):
             return item
+    # Collection concept belongs inside the collection section, not twice
+    # in the Hero and the catalogue. A second Hero image must be explicitly
+    # provided by the owner; otherwise collage downgrades to a single image.
     return None
 
 
@@ -520,6 +528,7 @@ def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem, media: li
     # Defense in depth for direct compiler callers bypassing the planning gate.
     # Unique, valid Creative Director headings pass through unchanged.
     seen_headings: set[str] = set()
+    used_concepts: set[str] = set()
     for index, section in enumerate(specs):
         key = " ".join(section.heading.casefold().split())
         if key in seen_headings or (index > 0 and key == page.page_name.casefold()):
@@ -538,6 +547,11 @@ def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem, media: li
         if section_type == "hero":
             # A typography-only scene must not render an unused photo layer.
             requested_layout = section_layout(layout, index)
+            if (requested_layout is not None and selected_image is not None
+                    and selected_image.get("ai_generated_role") == "hero"
+                    and requested_layout.hero_scene == "typographic"):
+                # Opt-in photography must not be discarded by a text-only scene.
+                requested_layout = requested_layout.model_copy(update={"hero_scene": "editorial", "visual_treatment": "media"})
             if requested_layout is not None:
                 resolved_scene = resolve_scene(requested_layout,
                     int(selected_image is not None) + int(secondary_image is not None))
@@ -551,7 +565,31 @@ def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem, media: li
                             product_names=product_names, h1=(index == 0), product_media=media)
         else:
             element = renderer(section, ds)
+        # Put editorial AI concepts into distinct, native Elementor Image widgets.
+        # These are not WooCommerce product images. Only the home page receives
+        # the page-scoped editorial media created for its story/collection.
+        editorial_role = ("collection" if section_type == "products" else
+                          "story" if section_type in {"content", "benefits", "trust", "process"} else "")
+        if page.page_slug == "home" and editorial_role and editorial_role not in used_concepts:
+            candidate = next((m for m in (media or [])
+                if m.get("ai_generated_role") == editorial_role and _validated_media_url(m)), None)
+            if candidate:
+                used_concepts.add(editorial_role)
+                visual = _container([_image_widget(candidate)], {
+                    "content_width": "full", "css_classes": f"tai-editorial-media tai-editorial-media-{editorial_role}",
+                    "padding": _box(0, 0, 0, 0), "width": _pct(100),
+                })
+                # Editorial media comes before collection text/cards to establish
+                # hierarchy; it is never put inside a verified product card.
+                if editorial_role == "collection":
+                    element["elements"].insert(0, visual)
+                else:
+                    element["elements"].append(visual)
         section_spec = section_layout(layout, index)
+        if (section_spec is not None and section_type == "hero" and selected_image is not None
+                and selected_image.get("ai_generated_role") == "hero"
+                and section_spec.hero_scene == "typographic"):
+            section_spec = section_spec.model_copy(update={"hero_scene": "editorial", "visual_treatment": "media"})
         if (section_spec is not None and section_type == "hero" and selected_image is None
             and section_spec.visual_treatment == "media"):
             # Never pretend that an empty graphic block is a real product photo.

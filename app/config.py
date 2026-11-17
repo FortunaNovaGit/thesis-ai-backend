@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     # Enable this only when testing advisory Builder LLM behavior.
     enable_builder_llm_review: bool = False
 
+    # v0.11: image generation is disabled unless the operator opts in in Render.
+    enable_image_generation: bool = False
+    openai_image_model: str = "gpt-image-2.5-flare"
+    max_media_jobs_per_site_day: int = 2  # up to six images/day per connected site
+
     # Legacy push settings retained only for old CLI/tests. v0.6+ WordPress Pull
     # execution means the cloud backend does not call WordPress to mutate it.
     wordpress_mode: str = "mock"

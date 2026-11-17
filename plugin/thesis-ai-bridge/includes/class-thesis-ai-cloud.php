@@ -286,10 +286,21 @@ final class Thesis_AI_Cloud {
             return new WP_Error('thesis_ai_not_connected', __('Connect AI Builder before starting a real multi-agent build.', 'thesis-ai-bridge'));
         }
         $active = self::active_build();
-        if (!empty($active['status']) && in_array((string)$active['status'], ['planning', 'executing', 'verifying', 'repairing'], true)) {
+        if (!empty($active['status']) && in_array((string)$active['status'], ['planning', 'media', 'executing', 'verifying', 'repairing'], true)) {
             return $active;
         }
 
+        // Fail before spending text-agent tokens if paid media mode is not
+        // actually configured on Render.
+        $requested_media = (self::ui_state()['brief']['media_mode'] ?? '') === 'generate_concepts';
+        if ($requested_media) {
+            $health = self::backend_request('GET', '/health', null, 10);
+            if (is_wp_error($health)) { return $health; }
+            if (empty($health['image_generation_ready'])) {
+                return new WP_Error('thesis_ai_media_not_ready',
+                    'AI image generation is not enabled/configured on Render. Set ENABLE_IMAGE_GENERATION=true and OPENAI_API_KEY, or choose existing images only.');
+            }
+        }
         $snapshot = Thesis_AI_Bridge::execute_named_ability('get-site-snapshot', []);
         if (is_wp_error($snapshot)) {
             return $snapshot;
@@ -316,6 +327,8 @@ final class Thesis_AI_Cloud {
             'detail' => sanitize_text_field((string)($body['detail'] ?? 'Multi-agent planning queued')),
             'prompt' => $prompt,
             'renderer' => $renderer,
+            'media_mode' => (string)((self::ui_state()['brief']['media_mode'] ?? '') === 'generate_concepts' ? 'generate_concepts' : 'reuse_only'),
+            'media_completed' => false,
             'executions' => [],
             'repair_attempts' => 0,
             'started_at' => gmdate('c'),
@@ -371,7 +384,8 @@ final class Thesis_AI_Cloud {
             return;
         }
         if (!wp_next_scheduled(self::WORKER_HOOK)) {
-            wp_schedule_single_event(time(), self::WORKER_HOOK);
+            $delay = (string)(self::active_build()['phase'] ?? '') === 'media' ? 5 : 0;
+            wp_schedule_single_event(time() + $delay, self::WORKER_HOOK);
         }
         // Spawn WordPress' own non-blocking cron request. The build therefore
         // continues even when the admin page is refreshed or the tab is closed.
@@ -431,6 +445,9 @@ final class Thesis_AI_Cloud {
                     update_option(self::OPTION_ACTIVE_BUILD, $active, false);
                 }
                 $phase = (string)($active['phase'] ?? '');
+                if ($phase === 'media') {
+                    break; // asynchronous image jobs: do not spin in a PHP request.
+                }
                 if ($phase === 'planning') {
                     sleep(2);
                     continue;
@@ -483,6 +500,9 @@ final class Thesis_AI_Cloud {
         if ($phase === 'planning') {
             return self::poll_planning($active);
         }
+        if ($phase === 'media') {
+            return self::poll_media($active);
+        }
         if (in_array($phase, ['executing', 'repairing'], true)) {
             return self::execute_next_local_action($active);
         }
@@ -530,6 +550,23 @@ final class Thesis_AI_Cloud {
         }
 
         $bundle = $body['result'];
+        // Image generation starts only after the planning/editorial gate has
+        // succeeded. This avoids paying for images that a failing plan cannot use.
+        if (empty($active['media_completed']) && ($active['media_mode'] ?? '') === 'generate_concepts'
+            && !empty($bundle['media_manifest']) && $active['renderer'] !== 'gutenberg') {
+            $active['media_manifest_roles'] = array_values(array_filter(array_map(
+                static fn($item): string => is_array($item) ? sanitize_key((string)($item['role'] ?? '')) : '',
+                (array)$bundle['media_manifest'])));
+            $active['phase'] = 'media';
+            $active['status'] = 'media';
+            $active['stage'] = 'media_generation';
+            $active['progress'] = 28;
+            $active['detail'] = 'Creative plan passed. Creating approved editorial concept images.';
+            $active['updated_at'] = gmdate('c');
+            update_option(self::OPTION_ACTIVE_BUILD, $active, false);
+            self::log_event('info', 'План успішний. Починаємо генерацію AI-концептів.', ['stage' => 'media']);
+            return $active;
+        }
         $offered = array_fill_keys((array)(Thesis_AI_Bridge::build_contract()['abilities'] ?? []), true);
         foreach ((array)($bundle['approved_actions'] ?? []) as $planned) {
             $full = (string)(($planned['action']['ability'] ?? ''));
@@ -569,6 +606,138 @@ final class Thesis_AI_Cloud {
         update_option(self::OPTION_ACTIVE_BUILD, $active, false);
         self::log_event('success', sprintf(__('План готовий. Заплановано %d контрольованих WordPress-дій.', 'thesis-ai-bridge'), count($queue)), ['stage' => 'implementation_plan', 'run_id' => (string)($active['job_id'] ?? '')]);
         return $active;
+    }
+
+    /** An opt-in media pipeline that runs in short WP-Cron steps (no long PHP/504). */
+    private static function poll_media(array $active): array|WP_Error {
+        $c = self::full_connection();
+        if (!$c) { return new WP_Error('thesis_ai_media_connection', 'Backend connection is missing.'); }
+        $site_path = '/v2/sites/' . rawurlencode((string)$c['site_id']);
+        $plan_id = (string)($active['job_id'] ?? '');
+        $media_id = (string)($active['media_job_id'] ?? '');
+        if ($media_id === '') {
+            $state = self::ui_state();
+            $has_owner_hero = !empty($state['brief']['hero_image_id']);
+            $roles = $has_owner_hero ? ['collection', 'story'] : ['hero', 'collection', 'story'];
+            $roles = array_values(array_intersect($roles, (array)($active['media_manifest_roles'] ?? $roles)));
+            if (!$roles) {
+                $active['media_completed'] = true;
+                $active['phase'] = 'planning';
+                $active['status'] = 'planning';
+                update_option(self::OPTION_ACTIVE_BUILD, $active, false);
+                return $active;
+            }
+            $started = self::backend_request('POST', $site_path . '/media-jobs',
+                ['plan_job_id' => $plan_id, 'roles' => $roles], 15, $c);
+            if (is_wp_error($started)) { return $started; }
+            if (empty($started['job_id'])) { return new WP_Error('thesis_ai_media_id', 'No media job identifier.'); }
+            $active['media_job_id'] = sanitize_text_field((string)$started['job_id']);
+            $active['media_uploaded'] = [];
+            $active['stage'] = 'media_generation';
+            $active['detail'] = 'AI концепти генеруються окремо; WordPress очікує результат.';
+            $active['updated_at'] = gmdate('c');
+            update_option(self::OPTION_ACTIVE_BUILD, $active, false);
+            return $active;
+        }
+        $base = $site_path . '/media-jobs/' . rawurlencode($media_id);
+        $job = self::backend_request('GET', $base, null, 12, $c);
+        if (is_wp_error($job)) { return $job; }
+        $status = (string)($job['status'] ?? '');
+        if ($status === 'failed') {
+            $message = sanitize_text_field((string)($job['error'] ?? 'Image generation failed'));
+            self::finalize_failed_build($active, $message, 'media');
+            return new WP_Error('thesis_ai_media_failed', $message);
+        }
+        if ($status !== 'completed') {
+            $active['progress'] = 29;
+            $active['detail'] = 'Генеруємо зображення. План і тексти вже перевірені.';
+            $active['updated_at'] = gmdate('c');
+            update_option(self::OPTION_ACTIVE_BUILD, $active, false);
+            return $active;
+        }
+        $assets = (array)($job['assets'] ?? []);
+        foreach ($assets as $asset) {
+            if (!is_array($asset) || empty($asset['key'])) { continue; }
+            $key = sanitize_key((string)$asset['key']);
+            if (!in_array($key, ['hero', 'collection', 'story'], true)) { return new WP_Error('thesis_ai_media_role', 'Unknown media role.'); }
+            if (in_array($key, (array)($active['media_uploaded'] ?? []), true)) { continue; }
+            $attachment = self::sideload_concept_image($c, $media_id, $key, $asset);
+            if (is_wp_error($attachment)) { return $attachment; }
+            $active['media_uploaded'][] = $key;
+            $active['progress'] = min(39, 30 + count($active['media_uploaded']) * 3);
+            $active['detail'] = 'Медіафайл ' . $key . ' додано у WordPress (#' . $attachment . ').';
+            $active['updated_at'] = gmdate('c');
+            update_option(self::OPTION_ACTIVE_BUILD, $active, false);
+            self::log_event('success', $active['detail'], ['stage' => 'media']);
+            return $active; // ONE image per short PHP request.
+        }
+        // Recompile the *existing* validated plan against the new WP media inventory.
+        // No new OpenAI text calls and no inbound requests to WordPress.
+        $snapshot = Thesis_AI_Bridge::execute_named_ability('get-site-snapshot', []);
+        if (is_wp_error($snapshot)) { return $snapshot; }
+        $result = self::backend_request('POST', $site_path . '/plans/' . rawurlencode($plan_id) . '/recompile-media',
+            ['plan_job_id' => $plan_id, 'media_job_id' => $media_id, 'site_snapshot' => $snapshot], 20, $c);
+        if (is_wp_error($result)) { return $result; }
+        if (empty($result['recompiled'])) { return new WP_Error('thesis_ai_media_recompile', 'Media recompile was not accepted.'); }
+        $active['media_completed'] = true;
+        $active['phase'] = 'planning';
+        $active['status'] = 'planning';
+        $active['stage'] = 'plan_ready';
+        $active['detail'] = 'Зображення завантажені. Elementor-план оновлено без нового AI-запиту.';
+        $active['updated_at'] = gmdate('c');
+        update_option(self::OPTION_ACTIVE_BUILD, $active, false);
+        return $active;
+    }
+
+    /** Download only from the configured backend, using a site-bound bearer token. */
+    private static function sideload_concept_image(array $c, string $media_id, string $key, array $asset): int|WP_Error {
+        $previous = get_posts(['post_type' => 'attachment', 'post_status' => 'inherit', 'posts_per_page' => 1,
+            'meta_query' => [
+                ['key' => '_thesis_ai_media_job_id', 'value' => $media_id],
+                ['key' => '_thesis_ai_media_role', 'value' => $key],
+            ]]);
+        if ($previous && wp_attachment_is_image($previous[0]->ID)) { return (int)$previous[0]->ID; }
+        $path = '/v2/sites/' . rawurlencode((string)$c['site_id']) . '/media-jobs/' . rawurlencode($media_id) . '/assets/' . rawurlencode($key);
+        $response = wp_remote_get(untrailingslashit((string)$c['backend_url']) . $path, [
+            'timeout' => 15, 'redirection' => 0,
+            'headers' => ['Accept' => 'image/webp', 'Authorization' => 'Bearer ' . (string)$c['site_token']],
+            'limit_response_size' => 5100000,
+        ]);
+        if (is_wp_error($response)) { return $response; }
+        $raw = (string)wp_remote_retrieve_body($response);
+        if (wp_remote_retrieve_response_code($response) !== 200
+            || stripos((string)wp_remote_retrieve_header($response, 'content-type'), 'image/webp') !== 0
+            || strlen($raw) < 100 || strlen($raw) > 5000000
+            || substr($raw, 0, 4) !== 'RIFF' || substr($raw, 8, 4) !== 'WEBP') {
+            return new WP_Error('thesis_ai_media_invalid', 'Backend returned an invalid image or an unexpected response.');
+        }
+        // Verify actual decodable image dimensions, not just Content-Type and
+        // the RIFF/WEBP signature supplied by an upstream service.
+        $image_info = @getimagesizefromstring($raw);
+        if (!is_array($image_info) || ($image_info['mime'] ?? '') !== 'image/webp'
+            || (int)($image_info[0] ?? 0) < 400 || (int)($image_info[1] ?? 0) < 300
+            || (int)($image_info[0] ?? 0) * (int)($image_info[1] ?? 0) > 9000000) {
+            return new WP_Error('thesis_ai_media_dimensions', 'Generated image is not valid WebP or has unsupported dimensions.');
+        }
+        if (!current_user_can('upload_files')) { return new WP_Error('thesis_ai_media_permissions', 'Upload permission required.'); }
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        require_once ABSPATH . 'wp-admin/includes/media.php';
+        require_once ABSPATH . 'wp-admin/includes/image.php';
+        $tmp = wp_tempnam('thesis-ai-concept-' . $key . '.webp');
+        if (!$tmp || file_put_contents($tmp, $raw) !== strlen($raw)) {
+            if ($tmp && file_exists($tmp)) { unlink($tmp); }
+            return new WP_Error('thesis_ai_media_disk', 'Unable to save image in WordPress temporary directory.');
+        }
+        $title = 'AI editorial concept — ' . ucfirst($key);
+        $id = media_handle_sideload(['name' => 'thesis-ai-' . $media_id . '-' . $key . '.webp',
+            'tmp_name' => $tmp, 'type' => 'image/webp', 'error' => 0, 'size' => strlen($raw)], 0, $title);
+        if (is_wp_error($id)) { @unlink($tmp); return $id; }
+        update_post_meta($id, '_thesis_ai_media_job_id', $media_id);
+        update_post_meta($id, '_thesis_ai_media_role', $key);
+        update_post_meta($id, '_thesis_ai_media_provenance', 'ai_generated_concept_not_product_photo');
+        update_post_meta($id, '_wp_attachment_image_alt', sanitize_text_field((string)($asset['alt'] ?? 'AI editorial concept illustration')));
+        wp_update_post(['ID' => $id, 'post_excerpt' => 'Ілюстративне AI-зображення, не реальна фотографія товару.']);
+        return (int)$id;
     }
 
     /** Stable across page refreshes and WP-Cron retries, scoped to one build plan. */

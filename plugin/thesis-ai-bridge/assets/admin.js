@@ -88,12 +88,13 @@
     stage=(stage||'').toLowerCase();
     if(['completed','quality','verification'].includes(stage)) return 4;
     if(['local_execution','executing','repair','repairing'].includes(stage)) return 3;
+    if(stage==='media_generation'||stage==='media') return 2;
     if(['implementation_plan','plan_ready','ready'].includes(stage)) return 2;
     if(stage==='design') return 1;
     return 0;
   };
   const stageLabels={
-    queued:'Запит у черзі',starting:'Запускаємо агентів',orchestrator:'Аналіз запиту',architecture:'Архітектура та capabilities',design:'Структура, контент і SEO',implementation_plan:'План WordPress-дій',plan_ready:'План готовий',ready:'План готовий',local_execution:'Створюємо сайт у WordPress',verification:'Перевіряємо результат',quality:'QA та безпека',repair:'Автоматичне виправлення',completed:'Готово'
+    queued:'Запит у черзі',starting:'Запускаємо агентів',orchestrator:'Аналіз запиту',architecture:'Архітектура та capabilities',design:'Структура, контент і SEO',implementation_plan:'План WordPress-дій',plan_ready:'План готовий',ready:'План готовий',media_generation:'Генеруємо зображення',media:'Генеруємо зображення',local_execution:'Створюємо сайт у WordPress',verification:'Перевіряємо результат',quality:'QA та безпека',repair:'Автоматичне виправлення',completed:'Готово'
   };
   function updateSteps(stage){
     const current=stageToStep(stage);

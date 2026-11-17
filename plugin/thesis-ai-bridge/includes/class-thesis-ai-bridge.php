@@ -338,7 +338,10 @@ final class Thesis_AI_Bridge {
                 'preferred_home_hero_secondary' => (int)$post->ID === $secondary,
                 'alt' => (string)get_post_meta($post->ID, '_wp_attachment_image_alt', true),
                 'title' => (string)$post->post_title,
-                'caption' => (string)$post->post_excerpt];
+                'caption' => (string)$post->post_excerpt,
+                'ai_generated_role' => (string)get_post_meta($post->ID, '_thesis_ai_media_role', true),
+                'ai_media_job_id' => (string)get_post_meta($post->ID, '_thesis_ai_media_job_id', true),
+                'ai_provenance' => (string)get_post_meta($post->ID, '_thesis_ai_media_provenance', true)];
         }
         return $media;
     }

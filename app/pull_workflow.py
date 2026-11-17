@@ -35,6 +35,7 @@ from .models import (
     SiteSnapshot,
 )
 from .policy import PolicyEngine
+from .media_pipeline import build_media_manifest
 
 
 class PullPlanningWorkflow:
@@ -185,6 +186,7 @@ class PullPlanningWorkflow:
             "application_spec": app_spec.model_dump(mode="json"),
             "experience_spec": experience.model_dump(mode="json"),
             "creative_seed": creative_seed,
+            "media_manifest": build_media_manifest(brief, experience, user_request),
             "creative_direction": (experience.generative_design.selected().model_dump(mode="json")
                                    if experience.generative_design else None),
             "content_quality": {"passed": True, "issues": [], "repairs": [r.as_dict() for r in editorial_repairs], "checks": ["planning_copy", "duplicated_copy", "cta_links"]},

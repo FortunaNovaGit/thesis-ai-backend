@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+import hashlib
 import ipaddress
 import socket
 import uuid
@@ -12,7 +13,7 @@ from urllib.parse import urlparse
 
 from .version import VERSION
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from .agents.runtime import make_agent_runtime
@@ -22,10 +23,16 @@ from .connection_token import ConnectionTokenCodec
 from .models import SiteSnapshot
 from .pull_workflow import PullPlanningWorkflow
 from .repository import JobRepository
+from .media_store import MediaStore
+from .image_provider import generate_concept
+from .models import ApplicationSpec, ExperienceSpec, Renderer
+from .agents.runtime import compile_build_plan
 
 
 app = FastAPI(title="WordPress Multi-Agent Thesis API", version=VERSION)
 repository = JobRepository(settings.database_url)
+media_store = MediaStore(repository.engine)
+_media_tasks: dict[str, asyncio.Task[Any]] = {}
 codec = ConnectionTokenCodec(settings.backend_token_secret, Path(settings.backend_key_file))
 
 # Planning jobs live only while the Render process is alive. The actual WordPress
@@ -73,6 +80,15 @@ class PullPlanRequest(BaseModel):
     renderer: str = Field(default="elementor", pattern="^(elementor|gutenberg|auto)$")
     site_snapshot: dict[str, Any]
 
+
+class MediaJobRequest(BaseModel):
+    plan_job_id: str = Field(min_length=30, max_length=48)
+    roles: list[str] = Field(default_factory=lambda: ["hero", "collection", "story"], max_length=3)
+
+class MediaRecompileRequest(BaseModel):
+    plan_job_id: str = Field(min_length=30, max_length=48)
+    media_job_id: str = Field(min_length=30, max_length=48)
+    site_snapshot: dict[str, Any]
 
 class VerifyRequest(BaseModel):
     # Send plan_job_id instead of the often multi-megabyte Elementor plan.
@@ -146,6 +162,10 @@ async def health() -> dict[str, Any]:
         "editorial_quality_gate": "v3_authored_copy_preserved",
         "generative_design": "visual_composer_v1_elementor_v3",
         "visual_composer": "bounded_hero_scenes_v1",
+        "media_pipeline": "opt_in_ai_concepts_3_assets_v1",
+        "image_generation_enabled": settings.enable_image_generation,
+        "image_generation_ready": bool(settings.enable_image_generation and settings.openai_api_key),
+        "image_model": settings.openai_image_model if settings.enable_image_generation else "disabled",
         "visual_qa": "opt_in_playwright_cli_not_automated",
         "job_store": "postgresql" if repository.durable else "sqlite_ephemeral",
         "durable_jobs": repository.durable,
@@ -328,6 +348,116 @@ async def get_plan(site_id: str, job_id: str, authorization: str | None = Header
     _resume_if_needed(job, site_id)
     return _public_job(job)
 
+
+
+
+# -------- Optional, plan-bound AI editorial media jobs --------
+# The authenticated WordPress Pull worker requests generation only after the
+# normal five-agent plan and editorial quality gate have succeeded.
+async def _run_media_job(site_id: str, media_job_id: str, specs: list[dict[str, Any]]) -> None:
+    try:
+        media_store.update(site_id, media_job_id, status="running")
+        for spec in specs:
+            raw = await generate_concept(spec["prompt"], spec["size"],
+                api_key=settings.openai_api_key or "", model=settings.openai_image_model,
+                safety_identifier=hashlib.sha256(site_id.encode()).hexdigest()[:32])
+            media_store.save_asset(site_id, media_job_id, spec["key"], raw)
+        media_store.update(site_id, media_job_id, status="completed")
+    except Exception as exc:
+        # Avoid including HTTP headers, credentials or provider response bodies.
+        media_store.update(site_id, media_job_id, status="failed",
+            error=f"Image generation failed ({type(exc).__name__}). Check Render logs and image model configuration.")
+    finally:
+        _media_tasks.pop(media_job_id, None)
+
+
+@app.post("/v2/sites/{site_id}/media-jobs", status_code=202)
+async def start_media_job(site_id: str, payload: MediaJobRequest, authorization: str | None = Header(default=None)):
+    _credentials(site_id, authorization)
+    if not settings.enable_image_generation:
+        raise HTTPException(409, "Image generation disabled on backend. Set ENABLE_IMAGE_GENERATION=true explicitly.")
+    if not settings.openai_api_key:
+        raise HTTPException(409, "OPENAI_API_KEY is required for media generation")
+    job = _get_job(payload.plan_job_id, site_id)
+    if not job or job.get("status") != "completed" or not isinstance(job.get("result"), dict):
+        raise HTTPException(409, "A completed, validated site plan is required before media generation")
+    bundle = job["result"]
+    if not bundle.get("content_quality", {}).get("passed"):
+        raise HTTPException(409, "Content Quality Gate has not passed")
+    from .media_pipeline import ALLOWED_ROLES
+    if not payload.roles or len(set(payload.roles)) != len(payload.roles) or not set(payload.roles) <= ALLOWED_ROLES:
+        raise HTTPException(422, "Unsupported or duplicated media roles")
+    specs = [s for s in bundle.get("media_manifest", []) if s["role"] in payload.roles]
+    if not specs:
+        raise HTTPException(422, "Plan has no eligible editorial media slots")
+    existing = media_store.get_by_plan(site_id, payload.plan_job_id)
+    if existing:
+        return {k: v for k, v in existing.items() if k != "site_id"}
+    if media_store.count_today(site_id) >= settings.max_media_jobs_per_site_day:
+        raise HTTPException(429, "Daily image generation quota reached for this site")
+    media_store.cleanup(2)
+    created = media_store.create(site_id, payload.plan_job_id, specs)
+    if created.pop("_created_here", False):
+        _media_tasks[created["job_id"]] = asyncio.create_task(_run_media_job(site_id, created["job_id"], specs))
+    return {k: v for k, v in created.items() if k != "site_id"}
+
+
+@app.get("/v2/sites/{site_id}/media-jobs/{media_job_id}")
+async def get_media_job(site_id: str, media_job_id: str, authorization: str | None = Header(default=None)):
+    _credentials(site_id, authorization)
+    job = media_store.get(site_id, media_job_id)
+    if not job: raise HTTPException(404, "Media job not found")
+    if job["status"] in {"queued", "running"} and media_job_id not in _media_tasks:
+        media_store.update(site_id, media_job_id, status="failed",
+            error="Render worker restarted during generation. No automatic paid retry was made.")
+        job = media_store.get(site_id, media_job_id)
+    return {k:v for k,v in job.items() if k != "site_id"}
+
+
+@app.get("/v2/sites/{site_id}/media-jobs/{media_job_id}/assets/{asset_key}")
+async def get_media_asset(site_id: str, media_job_id: str, asset_key: str, authorization: str | None = Header(default=None)):
+    _credentials(site_id, authorization)
+    job = media_store.get(site_id, media_job_id)
+    if not job or job["status"] != "completed":
+        raise HTTPException(404, "Completed media job not found")
+    if asset_key not in {a["key"] for a in job["assets"]}:
+        raise HTTPException(404, "Asset key not in approved plan")
+    raw = media_store.asset(site_id, media_job_id, asset_key)
+    if raw is None: raise HTTPException(404, "Media asset not found")
+    return Response(content=raw, media_type="image/webp", headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
+
+
+@app.post("/v2/sites/{site_id}/plans/{job_id}/recompile-media")
+async def recompile_plan_with_media(site_id: str, job_id: str, payload: MediaRecompileRequest,
+                                    authorization: str | None = Header(default=None)):
+    _credentials(site_id, authorization)
+    if payload.plan_job_id != job_id:
+        raise HTTPException(400, "Plan ID mismatch")
+    job = _get_job(job_id, site_id)
+    media_job = media_store.get(site_id, payload.media_job_id)
+    if not job or job.get("status") != "completed" or not media_job or media_job["plan_id"] != job_id or media_job["status"] != "completed":
+        raise HTTPException(409, "Plan and completed media job must belong to the same site")
+    _body_size(payload, settings.max_snapshot_bytes)
+    snapshot = SiteSnapshot.model_validate(payload.site_snapshot)
+    uploaded = {str(x.get("ai_generated_role")) for x in snapshot.media if x.get("ai_media_job_id") == payload.media_job_id}
+    expected = {x["role"] for x in media_job["assets"]}
+    if not expected <= uploaded:
+        raise HTTPException(409, "WordPress has not confirmed all generated media attachments")
+    bundle = job["result"]
+    if bundle.get("media_recompiled_job_id") == payload.media_job_id:
+        return {"recompiled": True, "already_done": True}
+    planner = PullPlanningWorkflow(settings, make_agent_runtime("mock", settings.openai_model))
+    app_spec = ApplicationSpec.model_validate(bundle["application_spec"])
+    experience = ExperienceSpec.model_validate(bundle["experience_spec"])
+    actions = compile_build_plan(app_spec, experience, snapshot, bundle["renderer"], user_request=bundle["user_request"])
+    gated = planner._gate_actions(actions.actions)
+    bundle.update({"site_snapshot": snapshot.model_dump(mode="json"), "build_plan": actions.model_dump(mode="json"),
+                   "approved_actions": gated["allowed"], "pending_actions": gated["pending"], "blocked_actions": gated["blocked"],
+                   "media_recompiled_job_id": payload.media_job_id})
+    job.update({"result": bundle, "updated_at": _utcnow()})
+    _plan_jobs[job_id] = job
+    _save_job(job)
+    return {"recompiled": True, "images": len(expected), "approved_actions": len(gated["allowed"])}
 
 def _rehydrate_executions(executions: list[dict[str, Any]], bundle: dict[str, Any]) -> list[dict[str, Any]]:
     """Recover full action parameters locally, without transporting Elementor JSON.
