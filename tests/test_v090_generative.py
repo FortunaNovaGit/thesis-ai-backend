@@ -140,10 +140,11 @@ def test_layout_compiles_two_original_compositions_without_losing_editability():
     assert "tai-layout-split" in b[0]["settings"]["css_classes"]
     assert "tai-split-40" in b[0]["settings"]["css_classes"]
     assert all(x["elType"] in {"container", "widget"} for x in walk(a))
-    assert all(x["widgetType"] in {"heading", "text-editor", "image", "button", "shortcode"}
+    assert all(x["widgetType"] in {"heading", "text-editor", "image", "button", "shortcode", "icon"}
                for x in walk(a) if x["elType"] == "widget")
     for design in (a, b):
-        titles = [x["settings"]["title"] for x in walk(design) if x.get("widgetType") == "heading"]
+        import re as _re  # v0.12 accent <em> is presentational; visible words are unchanged.
+        titles = [_re.sub(r"<[^>]+>", "", x["settings"]["title"]) for x in walk(design) if x.get("widgetType") == "heading"]
         assert p.section_specs[0].heading in titles
         assert p.section_specs[1].heading in titles
     assert p.section_specs[0].heading not in str(a[0]["settings"])  # geometry never stores visitor copy

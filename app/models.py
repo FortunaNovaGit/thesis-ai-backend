@@ -195,6 +195,9 @@ class SectionContentSpec(BaseModel):
     items: list[str] = Field(default_factory=list)
     cta_label: str | None = None
     cta_url: str | None = None
+    # v0.12: optional quieter second action (e.g. "Як замовити" -> #process).
+    secondary_cta_label: str | None = None
+    secondary_cta_url: str | None = None
     style_variant: Literal["default", "soft", "accent", "dark"] = "default"
 
 
@@ -250,7 +253,7 @@ class SectionLayoutSpec(BaseModel):
     heading_emphasis: Literal["calm", "balanced", "dramatic"] = "balanced"
     # Independent primitives per section, composed by the Creative Director.
     # No fixed site template or LLM-supplied executable CSS is accepted.
-    card_presentation: Literal["grid", "bento", "list"] = "grid"
+    card_presentation: Literal["grid", "bento", "list", "timeline"] = "grid"
     surface_treatment: Literal["canvas", "tinted", "bordered"] = "canvas"
     content_alignment: Literal["start", "center"] = "start"
     visual_treatment: Literal["abstract", "typography", "media"] = "abstract"

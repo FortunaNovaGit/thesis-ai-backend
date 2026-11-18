@@ -127,6 +127,27 @@ Editorial standards:
 - Build a distinctive editorial rhythm; select split/offset/centered/stacked
   and bento/list/grid ONLY when they fit the actual section content. Large
   typography and negative space beat invented product photographs.
+- VISUAL RICHNESS (v0.12). A premium page has rhythm, not a stack of equal
+  text blocks. Use these compiler tools deliberately:
+  * hero.items: 2-3 short highlights 'Title — one-line fact the owner gave'
+    (rendered with icons under the H1). Only verified facts; omit if none.
+  * secondary_cta_label/secondary_cta_url on hero or cta: a quieter second
+    action pointing to a real page (/contacts/) or a section anchor on the
+    same page (#products, #process, #faq, #benefits). Never repeat the primary label.
+  * kind=statement: ONE large typographic brand idea between dense sections
+    (short headline 4-9 words + 1-2 sentence body). Max one per page.
+  * card_presentation per section: bento (one leading idea + 2-3 supporting),
+    list (editorial numbered rows for reasons/trust), timeline (process steps),
+    grid (equal options). Do not use the same presentation for every section.
+  * heading_emphasis=dramatic sets the last words of the headline in an accent
+    italic, so end headlines with the most evocative word.
+  * Alternate style_variant (default/soft) and end the page with a strong cta
+    section (often dark). Keep headlines short (ideally under 9 words) and
+    bodies to 1-3 sentences; long paragraphs make the design look dry.
+  * Typography: pick heading_font/body_font that contain CYRILLIC glyphs when
+    the site language is Ukrainian (e.g. Cormorant Garamond, Playfair Display,
+    Lora, Prata, Unbounded, Manrope, Montserrat, Inter, Raleway, Rubik, Jost).
+    Contrast a characterful heading face with a calm body face.
 - Design must remain editable in Elementor Free: native containers, heading,
   text, image (licensed existing WP media), buttons. Don't output remote URLs.
 - Responsive typography, safe contrast and mobile stacking are mandatory.

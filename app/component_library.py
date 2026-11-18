@@ -118,30 +118,147 @@ def _container(elements: list[dict[str, Any]], settings: dict[str, Any] | None =
     return {"id": _eid(), "elType": "container", "isInner": False, "settings": base, "elements": elements}
 
 
-def _heading(text: str, color: str, ds: DesignSystem, *, level: str = "h2", size: int | None = None) -> dict[str, Any]:
+# ---------------------------------------------------------------------------
+# v0.12 Rich Visual System
+#
+# Every visible element is still a separate native Elementor widget (heading,
+# text-editor, button, icon, image, shortcode). The richer look comes from
+# (1) a real type scale with native responsive sizes, (2) structure per
+# section kind/presentation, (3) allowlisted CSS classes styled by the Bridge
+# stylesheet `rich-sections.css`. No LLM-authored CSS/HTML/URLs are emitted.
+# ---------------------------------------------------------------------------
+
+# Font Awesome 5 Free (bundled with Elementor Free). Deterministic keyword
+# mapping; the LLM never supplies icon names.
+ICON_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("подар", "gift", "сюрприз"), "fas fa-gift"),
+    (("ручн", "hand", "майстер", "craft", "авторськ"), "fas fa-hand-sparkles"),
+    (("склад", "інгред", "натурал", "ingred", "organic", "еко", "рослин"), "fas fa-leaf"),
+    (("достав", "deliver", "shipping", "кур'єр", "курʼєр", "відправ"), "fas fa-shipping-fast"),
+    (("замов", "order", "кошик", "cart", "купі", "купу", "оплат"), "fas fa-shopping-bag"),
+    (("парті", "свіж", "fresh", "термін", "швидк", "хвилин", "time", "годин"), "fas fa-clock"),
+    (("консульт", "підтрим", "support", "напиш", "chat", "питан", "зв'яз", "звʼяз", "форм"), "fas fa-comments"),
+    (("безпеч", "гаранті", "надійн", "secure", "safe", "захист", "чесн"), "fas fa-shield-alt"),
+    (("преміум", "якіст", "quality", "premium", "розкіш", "елегант"), "fas fa-gem"),
+    (("кав", "coffee", "чай", "вечір", "вечор"), "fas fa-mug-hot"),
+    (("коробк", "упаков", "box", "pack", "подач"), "fas fa-box-open"),
+    (("телефон", "phone", "дзвін"), "fas fa-phone-alt"),
+    (("пошт", "email", "e-mail", "лист"), "fas fa-envelope"),
+    (("адрес", "локац", "map", "місто", "район"), "fas fa-map-marker-alt"),
+    (("зуб", "стомат", "dental", "tooth", "усміш"), "fas fa-tooth"),
+    (("лікар", "доктор", "doctor", "спеціаліст", "фахів"), "fas fa-user-md"),
+    (("запис", "booking", "календ", "дат", "візит"), "fas fa-calendar-check"),
+    (("обер", "вибір", "вибер", "порівн", "choose", "compar", "пошук", "каталог"), "fas fa-search"),
+    (("турбот", "care", "догляд", "комфорт"), "fas fa-hand-holding-heart"),
+    (("дизайн", "стиль", "design", "естет"), "fas fa-palette"),
+    (("смак", "цукер", "шоколад", "taste", "candy", "десерт", "солод"), "fas fa-cookie-bite"),
+    (("ідея", "idea", "натхнен"), "fas fa-lightbulb"),
+)
+FALLBACK_ICONS = ("fas fa-star", "fas fa-heart", "fas fa-check-circle", "fas fa-feather-alt")
+ALLOWED_ICONS = frozenset([icon for _, icon in ICON_RULES] + list(FALLBACK_ICONS))
+
+
+def choose_icon(text: str, index: int = 0, used: set[str] | None = None) -> str:
+    """Pick a semantically related icon; avoid repeating one inside a section."""
+    key = text.casefold()
+    used = used if used is not None else set()
+    for stems, icon in ICON_RULES:
+        if icon not in used and any(stem in key for stem in stems):
+            used.add(icon)
+            return icon
+    for offset in range(len(FALLBACK_ICONS)):
+        icon = FALLBACK_ICONS[(index + offset) % len(FALLBACK_ICONS)]
+        if icon not in used:
+            used.add(icon)
+            return icon
+    return FALLBACK_ICONS[index % len(FALLBACK_ICONS)]
+
+
+def _icon(icon: str, color: str, *, classes: str = "tai-icon") -> dict[str, Any]:
+    if icon not in ALLOWED_ICONS:
+        icon = FALLBACK_ICONS[0]
+    return _widget("icon", {
+        "selected_icon": {"value": icon, "library": "fa-solid"},
+        "primary_color": color,
+        "align": "left",
+        "_css_classes": classes,
+    })
+
+
+def _emphasize(text: str) -> str:
+    """Escape heading text and set its final words in an accent italic.
+
+    Purely presentational (`<em>`), the words themselves are unchanged and
+    remain editable in Elementor; snapshot QA strips the tag.
+    """
+    words = text.split()
+    if len(words) < 4:
+        return html.escape(text, quote=False)
+    n = 2 if len(words) >= 6 else 1
+    head, tail = " ".join(words[:-n]), " ".join(words[-n:])
+    return f'{html.escape(head, quote=False)} <em class="tai-em">{html.escape(tail, quote=False)}</em>'
+
+
+# Native responsive type scale (desktop, tablet, mobile) in px.
+TYPE_SCALE = {
+    "h1-calm": (58, 46, 36), "h1-balanced": (66, 50, 38), "h1-dramatic": (78, 56, 40),
+    "h2": (48, 38, 30), "h2-display": (60, 44, 32), "h3": (24, 22, 20),
+    "lead": (20, 19, 17), "body": (17, 17, 16), "small": (15, 15, 14),
+}
+
+
+def _scaled(settings: dict[str, Any], key: str, scale: str) -> None:
+    desktop, tablet, mobile = TYPE_SCALE[scale]
+    settings[key] = _px(desktop)
+    settings[f"{key}_tablet"] = _px(tablet)
+    settings[f"{key}_mobile"] = _px(mobile)
+
+
+def _heading(text: str, color: str, ds: DesignSystem, *, level: str = "h2", size: int | None = None,
+             scale: str | None = None, emphasize: bool = False, classes: str = "") -> dict[str, Any]:
     settings: dict[str, Any] = {
-        "title": html.escape(text, quote=False),
+        "title": _emphasize(text) if emphasize else html.escape(text, quote=False),
         "header_size": level,
         "title_color": color,
         "typography_typography": "custom",
         "typography_font_family": ds.heading_font,
-        "typography_font_weight": "700",
-        "typography_line_height": {"unit": "em", "size": 1.12, "sizes": []},
+        "typography_font_weight": "600" if level in {"h1", "h2"} else "700",
+        "typography_line_height": {"unit": "em", "size": 1.06 if level == "h1" else 1.12, "sizes": []},
     }
-    if size:
+    if scale:
+        _scaled(settings, "typography_font_size", scale)
+    elif size:
         settings["typography_font_size"] = _px(size)
+    if classes:
+        settings["_css_classes"] = classes
     return _widget("heading", settings)
 
 
-def _text(text: str, color: str, ds: DesignSystem, *, size: int = 18) -> dict[str, Any]:
-    return _widget("text-editor", {
+def _label(text: str, color: str, ds: DesignSystem, *, classes: str) -> dict[str, Any]:
+    """Small non-heading text label (eyebrow, numeral) as a native Heading div."""
+    return _widget("heading", {
+        "title": html.escape(text, quote=False), "header_size": "div", "title_color": color,
+        "typography_typography": "custom", "typography_font_family": ds.body_font,
+        "typography_font_size": _px(13), "typography_font_weight": "700",
+        "_css_classes": classes,
+    })
+
+
+def _text(text: str, color: str, ds: DesignSystem, *, size: int = 18, scale: str | None = None,
+          classes: str = "") -> dict[str, Any]:
+    settings: dict[str, Any] = {
         "editor": f"<p>{html.escape(text, quote=False)}</p>",
         "text_color": color,
         "typography_typography": "custom",
         "typography_font_family": ds.body_font,
         "typography_font_size": _px(size),
         "typography_line_height": {"unit": "em", "size": 1.65, "sizes": []},
-    })
+    }
+    if scale:
+        _scaled(settings, "typography_font_size", scale)
+    if classes:
+        settings["_css_classes"] = classes
+    return _widget("text-editor", settings)
 
 
 def _readable_ink(background: str) -> str:
@@ -160,9 +277,10 @@ def _readable_ink(background: str) -> str:
     return "#101015" if luminance > .179 else "#FFFFFF"
 
 
-def _button(label: str, url: str, ds: DesignSystem, *, accent: bool = False) -> dict[str, Any]:
+def _button(label: str, url: str, ds: DesignSystem, *, accent: bool = False, ghost: bool = False,
+            ink: str | None = None) -> dict[str, Any]:
     bg = ds.accent if accent else ds.primary
-    return _widget("button", {
+    settings: dict[str, Any] = {
         "text": html.escape(label, quote=False),
         "link": {"url": url, "is_external": "", "nofollow": ""},
         "size": "md",
@@ -172,37 +290,96 @@ def _button(label: str, url: str, ds: DesignSystem, *, accent: bool = False) -> 
         "typography_typography": "custom",
         "typography_font_family": ds.body_font,
         "typography_font_weight": "600",
-    })
+        "_css_classes": "tai-btn tai-btn-primary" if not ghost else "tai-btn tai-btn-ghost",
+    }
+    if ghost:
+        # Outline action: background/border are drawn by the scoped stylesheet;
+        # Elementor still gets a valid readable fallback when CSS is absent.
+        settings["background_color"] = ds.background
+        settings["button_text_color"] = ink or ds.text
+    return _widget("button", settings)
 
 
-def _surface_card(title: str, body: str, ds: DesignSystem, *, width: int = 31, variant: str = "services", index: int = 0) -> dict[str, Any]:
-    elements = []
-    if variant == "process":
+def _actions(section: SectionContentSpec, ds: DesignSystem, *, accent: bool = False,
+             ink: str | None = None) -> list[dict[str, Any]]:
+    if not section.cta_label:
+        return []
+    buttons = [_button(section.cta_label, section.cta_url or "#", ds, accent=accent)]
+    if section.secondary_cta_label and section.secondary_cta_url:
+        buttons.append(_button(section.secondary_cta_label, section.secondary_cta_url, ds, ghost=True, ink=ink))
+    if len(buttons) == 1:
+        return buttons
+    return [_container(buttons, {
+        "content_width": "full", "flex_direction": "row", "flex_wrap": "wrap",
+        "align_items": "center", "gap": _px(14), "padding": _box(6, 0, 0, 0),
+        "css_classes": "tai-actions",
+    })]
+
+
+def _split_items(items: list[str]) -> list[tuple[str, str]]:
+    result: list[tuple[str, str]] = []
+    for item in items[:8]:
+        if " — " in item:
+            title, body = item.split(" — ", 1)
+        elif " – " in item:
+            title, body = item.split(" – ", 1)
+        elif ": " in item:
+            title, body = item.split(": ", 1)
+        else:
+            title, body = item, ""
+        body = body.strip()
+        # "Title — explanation" is rendered as two blocks; the explanation
+        # becomes its own sentence, so it starts with a capital letter.
+        if body[:1].islower():
+            body = body[:1].upper() + body[1:]
+        result.append((title.strip(), body))
+    return result
+
+
+def _surface_card(title: str, body: str, ds: DesignSystem, *, width: int = 31, variant: str = "services",
+                  index: int = 0, presentation: str = "grid", icon: str | None = None,
+                  ink: tuple[str, str] | None = None, surface: str | None = None) -> dict[str, Any]:
+    title_ink, body_ink = ink or (ds.text, ds.muted)
+    elements: list[dict[str, Any]] = []
+    numbered = variant == "process" or presentation in {"list", "timeline"}
+    if numbered:
         elements.append(_widget("heading", {
             "title": f"{index+1:02d}", "header_size": "div", "title_color": ds.accent,
             "typography_typography": "custom", "typography_font_family": ds.heading_font,
-            "typography_font_size": _px(36), "typography_font_weight": "500",
+            "typography_font_size": _px(40), "typography_font_weight": "500",
+            "_css_classes": "tai-card-index",
         }))
-    elements.append(_heading(title, ds.text, ds, level="h3", size=23))
+    elif icon and variant != "faq":
+        elements.append(_icon(icon, ds.accent, classes="tai-icon tai-card-icon"))
+    text_children = [_heading(title, title_ink, ds, level="h3", scale="h3", classes="tai-card-title")]
     if body:
-        elements.append(_text(body, ds.muted, ds, size=16))
+        text_children.append(_text(body, body_ink, ds, size=16, classes="tai-card-text"))
+    if presentation == "list" and variant not in {"faq"}:
+        # Editorial row: numeral | title + text. Nested container keeps it editable.
+        elements.append(_container(text_children, {
+            "content_width": "full", "padding": _box(0, 0, 0, 0), "gap": _px(8),
+            "css_classes": "tai-card-body",
+        }))
+    else:
+        elements.extend(text_children)
     return _container(elements, {
         "content_width": "full",
         "width": _pct(width),
         "width_mobile": _pct(100),
         "background_background": "classic",
-        "background_color": ds.surface,
-        "padding": _box(28, 28, 28, 28),
+        "background_color": surface or ds.surface,
+        "padding": _box(32, 30, 32, 30),
         "border_radius": _box(ds.radius, ds.radius, ds.radius, ds.radius),
-        "gap": _px(12), "css_classes": f"tai-feature-card tai-feature-card-{variant}",
+        "gap": _px(14),
+        "css_classes": f"tai-feature-card tai-feature-card-{variant} tai-card tai-card-{presentation}",
     })
 
 
 def _editorial_product_card(title: str, body: str, ds: DesignSystem, index: int, *, width: int = 48, media: dict[str, Any] | None = None) -> dict[str, Any]:
     """Editable catalog teaser. No counterfeit photographic or numeric placeholder.
 
-    Without verified attachment, render a compact editorial row instead of a
-    giant fake product-image rectangle. Commercial data still belongs to WC.
+    Without verified attachment, render an editorial text card (decorated only
+    by an abstract CSS pattern, never a fake product photo rectangle).
     """
     elements: list[dict[str, Any]] = []
     if media:
@@ -211,35 +388,17 @@ def _editorial_product_card(title: str, body: str, ds: DesignSystem, index: int,
             "css_classes": "tai-product-art-photo",
         }))
     else:
-        # Deliberate text-first preview; do not imply a product image exists.
-        elements.append(_widget("heading", {
-            "title": f"{index + 1:02d} /", "header_size": "div", "title_color": ds.accent,
-            "typography_typography": "custom", "typography_font_family": ds.body_font,
-            "typography_font_size": _px(14), "typography_font_weight": "600",
-        }))
-    elements.append(_heading(title, ds.text, ds, level="h3", size=26))
+        elements.append(_label(f"{index + 1:02d} / колекція", ds.accent, ds, classes="tai-product-index"))
+    elements.append(_heading(title, ds.text, ds, level="h3", size=30, classes="tai-product-title"))
     if body:
         elements.append(_text(body, ds.muted, ds, size=16))
     return _container(elements, {
         "content_width": "full", "width": _pct(width), "width_mobile": _pct(100),
-        "background_background": "classic", "background_color": ds.surface,
-        "padding": _box(16, 16, 24, 16) if media else _box(28, 22, 30, 22),
+        "background_background": "classic", "background_color": ds.background,
+        "padding": _box(16, 16, 24, 16) if media else _box(34, 30, 34, 30),
         "border_radius": _box(ds.radius, ds.radius, ds.radius, ds.radius),
-        "gap": _px(13), "css_classes": "tai-product-card " + ("tai-product-card-with-photo" if media else "tai-product-card-text-only"),
+        "gap": _px(13), "css_classes": "tai-product-card tai-card " + ("tai-product-card-with-photo" if media else "tai-product-card-text-only"),
     })
-
-
-def _split_items(items: list[str]) -> list[tuple[str, str]]:
-    result: list[tuple[str, str]] = []
-    for item in items[:8]:
-        if " — " in item:
-            title, body = item.split(" — ", 1)
-        elif ": " in item:
-            title, body = item.split(": ", 1)
-        else:
-            title, body = item, ""
-        result.append((title.strip(), body.strip()))
-    return result
 
 
 def _colors(section: SectionContentSpec, ds: DesignSystem) -> tuple[str, str, str]:
@@ -258,6 +417,11 @@ def _colors(section: SectionContentSpec, ds: DesignSystem) -> tuple[str, str, st
     return ds.background, ds.text, ds.muted
 
 
+def _card_surface(section: SectionContentSpec, ds: DesignSystem) -> str:
+    """Cards contrast with their section: soft sections get paper cards."""
+    return ds.background if section.style_variant == "soft" else ds.surface
+
+
 def _section_shell(section: SectionContentSpec, body: list[dict[str, Any]], ds: DesignSystem) -> dict[str, Any]:
     bg, _, _ = _colors(section, ds)
     return _container(body, {
@@ -265,35 +429,81 @@ def _section_shell(section: SectionContentSpec, body: list[dict[str, Any]], ds: 
         "width": _pct(100),
         "background_background": "classic",
         "background_color": bg,
-        "css_classes": f"thesis-ai-section thesis-ai-{section.section_type} thesis-ai-{section.component_key}",
+        "css_classes": (f"thesis-ai-section thesis-ai-{section.section_type} thesis-ai-{section.component_key} "
+                        f"tai-rich tai-tone-{section.style_variant} tai-kind-{section.section_type}"),
         "padding": _box(ds.section_spacing, 24, ds.section_spacing, 24),
-        "gap": _px(26),
+        "gap": _px(30),
     })
 
 
-def _intro(section: SectionContentSpec, ds: DesignSystem, *, h1: bool = False) -> list[dict[str, Any]]:
+def _intro(section: SectionContentSpec, ds: DesignSystem, *, h1: bool = False, display: bool = False,
+           emphasis: str = "balanced") -> list[dict[str, Any]]:
     _, title_color, body_color = _colors(section, ds)
+    on_color = section.style_variant in {"accent", "dark"}
     out: list[dict[str, Any]] = []
     if section.eyebrow:
-        out.append(_widget("heading", {
-            "title": html.escape(section.eyebrow.upper(), quote=False),
-            "header_size": "div",
-            "title_color": ds.accent if section.style_variant not in {"accent", "dark"} else title_color,
-            "typography_typography": "custom",
-            "typography_font_family": ds.body_font,
-            "typography_font_size": _px(13),
-            "typography_font_weight": "700",
-        }))
-    out.append(_heading(section.heading, title_color, ds, level="h1" if h1 else "h2", size=46 if h1 else 34))
+        out.append(_label(section.eyebrow.upper(), title_color if on_color else ds.accent, ds,
+                          classes="tai-eyebrow" + (" tai-eyebrow-pill" if h1 else "")))
+    if h1:
+        out.append(_heading(section.heading, title_color, ds, level="h1", scale=f"h1-{emphasis}",
+                            emphasize=emphasis != "calm", classes="tai-display tai-h1"))
+    else:
+        out.append(_heading(section.heading, title_color, ds, level="h2",
+                            scale="h2-display" if display else "h2",
+                            emphasize=display or emphasis == "dramatic", classes="tai-display tai-h2"))
     if section.body:
-        out.append(_text(section.body, body_color, ds, size=19 if h1 else 17))
+        out.append(_text(section.body, body_color, ds, scale="lead", classes="tai-lead"))
     return out
 
 
-def hero(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] | None = None, secondary_media: dict[str, Any] | None = None) -> dict[str, Any]:
-    left_elements = _intro(section, ds, h1=True)
-    if section.cta_label:
-        left_elements.append(_button(section.cta_label, section.cta_url or "#", ds, accent=section.style_variant == "dark"))
+def _section_header(section: SectionContentSpec, ds: DesignSystem, *, emphasis: str = "balanced",
+                    centered: bool = False, h1: bool = False) -> dict[str, Any]:
+    return _container(_intro(section, ds, h1=h1, emphasis=emphasis), {
+        "content_width": "full", "padding": _box(0, 0, 0, 0), "gap": _px(16),
+        "css_classes": "tai-section-head" + (" tai-section-head-center" if centered else ""),
+    })
+
+
+def _hero_highlights(section: SectionContentSpec, ds: DesignSystem) -> dict[str, Any] | None:
+    from .content_quality import looks_like_filler, looks_like_planning
+    # Legacy (non-creative) plans sometimes carry section *goals* in items;
+    # those must never become visitor-facing highlights.
+    pairs = [(t, b) for t, b in _split_items(section.items)
+             if t and len(t) <= 60 and not looks_like_planning(f"{t} {b}") and not looks_like_filler(f"{t} {b}")][:4]
+    if not pairs:
+        return None
+    _, title_ink, body_ink = _colors(section, ds)
+    used: set[str] = set()
+    cells = []
+    for i, (title, body) in enumerate(pairs):
+        children = [_icon(choose_icon(f"{title} {body}", i, used), ds.accent, classes="tai-icon tai-highlight-icon"),
+                    _widget("heading", {
+                        "title": html.escape(title, quote=False), "header_size": "div", "title_color": title_ink,
+                        "typography_typography": "custom", "typography_font_family": ds.body_font,
+                        "typography_font_size": _px(16), "typography_font_weight": "700",
+                        "_css_classes": "tai-highlight-title"})]
+        if body:
+            children.append(_text(body, body_ink, ds, size=14, classes="tai-highlight-text"))
+        cells.append(_container(children, {
+            "content_width": "full", "padding": _box(0, 0, 0, 0), "gap": _px(6),
+            "width": _pct(max(24, 100 // len(pairs) - 2)), "width_mobile": _pct(100),
+            "css_classes": "tai-highlight",
+        }))
+    return _container(cells, {
+        "content_width": "full", "flex_direction": "row", "flex_wrap": "wrap",
+        "flex_direction_mobile": "column", "gap": _px(22), "padding": _box(26, 0, 0, 0),
+        "css_classes": "tai-hero-highlights",
+    })
+
+
+def hero(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] | None = None,
+         secondary_media: dict[str, Any] | None = None, *, emphasis: str = "balanced") -> dict[str, Any]:
+    left_elements = _intro(section, ds, h1=True, emphasis=emphasis)
+    _, ink, _ = _colors(section, ds)
+    left_elements.extend(_actions(section, ds, accent=section.style_variant == "dark", ink=ink))
+    highlights = _hero_highlights(section, ds)
+    if highlights is not None and not media:
+        left_elements.append(highlights)
     left = _container(left_elements, {
         "content_width": "full",
         # Widths + gap must fit the grid: the visual CSS uses minmax(0,fr).
@@ -301,7 +511,7 @@ def hero(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] | 
         "width_mobile": _pct(100),
         "padding": _box(0, 0, 0, 0),
         "css_classes": "tai-hero-copy",
-        "gap": _px(22),
+        "gap": _px(24),
     })
 
     if media:
@@ -325,34 +535,52 @@ def hero(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] | 
         "content_width": "full",
         "flex_direction": "row", "flex_direction_mobile": "column",
         "align_items": "center", "css_classes": "tai-hero-grid",
-        "gap": _px(32), "padding": _box(0, 0, 0, 0),
+        "gap": _px(40), "padding": _box(0, 0, 0, 0),
     })
-    shell = _section_shell(section, [row], ds)
+    # With a photo the copy column is narrow: the highlight strip spans the
+    # full hero width underneath the composition instead of being squeezed.
+    shell = _section_shell(section, [row] + ([highlights] if highlights is not None and media else []), ds)
     if media is None:
         shell["settings"]["css_classes"] += " tai-visual-typography"
     return shell
 
 
-def cards(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] | None = None, *, live_catalog: bool = False, product_names: list[str] | None = None, h1: bool = False, product_media: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    body = _intro(section, ds, h1=h1)
+def cards(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] | None = None, *, live_catalog: bool = False,
+          product_names: list[str] | None = None, h1: bool = False, product_media: list[dict[str, Any]] | None = None,
+          presentation: str = "grid", emphasis: str = "balanced") -> dict[str, Any]:
+    header = _section_header(section, ds, emphasis=emphasis, h1=h1)
+    body: list[dict[str, Any]] = [header]
     pairs = _split_items(section.items)
+    if section.section_type == "process" and presentation in {"grid", "bento"}:
+        presentation = "timeline"  # Steps read as a sequence, never as a bento.
     if section.section_type == "products":
         # Names typed by the Creative Director are NOT verified product entries.
         # Only explicit owner-provided items may become teaser cards. Otherwise
         # show the true WooCommerce catalog (if public products exist) or the
         # authored introductory copy/CTA without invented card inventory.
         pairs = [(name, "") for name in (product_names or [])[:4]]
-    if section.section_type == "products":
         item_cards = [_editorial_product_card(title, text, ds, i, width=48 if len(pairs) <= 2 else 31,
                        media=choose_matching_media(title, product_media or []))
                       for i, (title, text) in enumerate(pairs)]
     else:
-        item_cards = [_surface_card(title, text, ds, width=31 if len(pairs) >= 3 else 48, variant=section.section_type, index=i) for i, (title, text) in enumerate(pairs)]
+        _, title_ink, body_ink = _colors(section, ds)
+        on_color = section.style_variant in {"accent", "dark"}
+        used_icons: set[str] = set()
+        item_cards = [_surface_card(
+            title, text, ds, width=31 if len(pairs) >= 3 else 48, variant=section.section_type, index=i,
+            presentation=presentation, icon=choose_icon(f"{title} {text}", i, used_icons),
+            ink=None if not on_color else (title_ink, body_ink),
+            surface=_card_surface(section, ds) if not on_color else None,
+        ) for i, (title, text) in enumerate(pairs)]
+        if on_color:
+            for card in item_cards:
+                card["settings"].pop("background_color", None)
+                card["settings"]["background_background"] = ""
     if section.section_type == "products" and live_catalog:
         # Render actual WooCommerce products when present. The shortcode does not
         # create fictitious demo catalog entries.
         body.append(_container([_widget("shortcode", {"shortcode": '[products limit="6" columns="3" orderby="date" order="DESC"]'})], {
-            "content_width": "boxed", "padding": _box(12, 0, 18, 0),
+            "content_width": "boxed", "padding": _box(12, 0, 18, 0), "css_classes": "tai-live-catalog",
         }))
     elif item_cards:
         body.append(_container(item_cards, {
@@ -360,90 +588,169 @@ def cards(section: SectionContentSpec, ds: DesignSystem, media: dict[str, Any] |
             "flex_direction": "row",
             "flex_wrap": "wrap",
             "flex_direction_mobile": "column",
-            "css_classes": f"tai-card-grid tai-card-grid-{section.section_type}",
-            "gap": _px(18),
+            "css_classes": (f"tai-card-grid tai-card-grid-{section.section_type} tai-cards-{presentation} "
+                            f"tai-count-{min(len(item_cards), 6)}"),
+            "gap": _px(20),
             "padding": _box(12, 0, 10, 0),
         }))
-    if section.cta_label:
-        body.append(_button(section.cta_label, section.cta_url or "#", ds))
+    body.extend(_actions(section, ds, accent=section.style_variant in {"dark", "accent"}))
     return _section_shell(section, body, ds)
 
 
-def faq(section: SectionContentSpec, ds: DesignSystem) -> dict[str, Any]:
-    body = _intro(section, ds)
-    for i, (title, text) in enumerate(_split_items(section.items)):
-        body.append(_surface_card(title, text, ds, width=100, variant="faq", index=i))
-    return _section_shell(section, body, ds)
+def statement(section: SectionContentSpec, ds: DesignSystem, *, emphasis: str = "dramatic") -> dict[str, Any]:
+    """Manifesto / brand idea: one large typographic moment between dense sections."""
+    _, title_color, body_color = _colors(section, ds)
+    on_color = section.style_variant in {"accent", "dark"}
+    inner: list[dict[str, Any]] = []
+    if section.eyebrow:
+        inner.append(_label(section.eyebrow.upper(), title_color if on_color else ds.accent, ds, classes="tai-eyebrow"))
+    inner.append(_heading(section.heading, title_color, ds, level="h2", scale="h2-display",
+                          emphasize=emphasis != "calm", classes="tai-display tai-h2 tai-statement-title"))
+    if section.body:
+        inner.append(_text(section.body, body_color, ds, scale="lead", classes="tai-lead tai-statement-text"))
+    inner.extend(_actions(section, ds, accent=on_color))
+    panel = _container(inner, {
+        "content_width": "full", "align_items": "center", "padding": _box(0, 0, 0, 0), "gap": _px(20),
+        "css_classes": "tai-statement",
+    })
+    return _section_shell(section, [panel], ds)
 
 
-def booking(section: SectionContentSpec, ds: DesignSystem) -> dict[str, Any]:
-    left = _container(_intro(section, ds), {
+def faq(section: SectionContentSpec, ds: DesignSystem, *, emphasis: str = "balanced") -> dict[str, Any]:
+    """Split FAQ: intro + native <details> disclosure items (keyboard accessible,
+    no JavaScript, each answer is its own editable Text Editor widget)."""
+    header = _section_header(section, ds, emphasis=emphasis)
+    _, title_ink, body_ink = _colors(section, ds)
+    header["settings"].update({"width": _pct(38), "width_mobile": _pct(100)})
+    header["settings"]["css_classes"] += " tai-faq-intro"
+    items = []
+    for i, (question, answer) in enumerate(_split_items(section.items)):
+        open_attr = " open" if i == 0 else ""
+        answer_html = f"<p>{html.escape(answer, quote=False)}</p>" if answer else ""
+        items.append(_widget("text-editor", {
+            "editor": (f'<details class="tai-faq-item"{open_attr}><summary>{html.escape(question, quote=False)}</summary>'
+                       f"{answer_html}</details>"),
+            "text_color": title_ink,
+            "typography_typography": "custom",
+            "typography_font_family": ds.body_font,
+            "typography_font_size": _px(17),
+            "_css_classes": "tai-faq",
+        }))
+    if not items:
+        return _section_shell(section, [header], ds)
+    listing = _container(items, {
+        "content_width": "full", "width": _pct(58), "width_mobile": _pct(100),
+        "padding": _box(0, 0, 0, 0), "gap": _px(12), "css_classes": "tai-faq-list",
+    })
+    row = _container([header, listing], {
+        "content_width": "full", "flex_direction": "row", "flex_direction_mobile": "column",
+        "gap": _px(48), "padding": _box(0, 0, 0, 0), "css_classes": "tai-faq-grid",
+    })
+    return _section_shell(section, [row], ds)
+
+
+def booking(section: SectionContentSpec, ds: DesignSystem, *, emphasis: str = "balanced") -> dict[str, Any]:
+    left = _container(_intro(section, ds, emphasis=emphasis), {
         "content_width": "full", "width": _pct(42), "width_mobile": _pct(100),
-        "padding": _box(12, 12, 12, 12),
+        "padding": _box(12, 12, 12, 12), "gap": _px(16), "css_classes": "tai-booking-copy",
     })
     form = _container([
         _widget("shortcode", {"shortcode": '[contact-form-7 title="AI Contact"]'})
     ], {
         "content_width": "full", "width": _pct(56), "width_mobile": _pct(100),
-        "background_background": "classic", "background_color": "#FFFFFF",
-        "padding": _box(30, 30, 30, 30), "border_radius": _box(ds.radius, ds.radius, ds.radius, ds.radius),
+        "background_background": "classic", "background_color": ds.background if section.style_variant == "soft" else ds.surface,
+        "padding": _box(36, 36, 36, 36), "border_radius": _box(ds.radius, ds.radius, ds.radius, ds.radius),
+        "css_classes": "tai-form-panel",
     })
     row = _container([left, form], {
         "content_width": "boxed", "flex_direction": "row", "flex_direction_mobile": "column",
-        "gap": _px(36), "align_items": "center", "padding": _box(0, 0, 0, 0),
+        "gap": _px(48), "align_items": "center", "padding": _box(0, 0, 0, 0),
     })
     return _section_shell(section, [row], ds)
 
 
-def contact(section: SectionContentSpec, ds: DesignSystem) -> dict[str, Any]:
+def contact(section: SectionContentSpec, ds: DesignSystem, *, emphasis: str = "balanced") -> dict[str, Any]:
     pairs = _split_items(section.items)
-    left = _container(_intro(section, ds), {
+    left = _container(_intro(section, ds, emphasis=emphasis), {
         "content_width": "full", "width": _pct(54), "width_mobile": _pct(100),
-        "padding": _box(12, 12, 12, 12),
+        "padding": _box(12, 12, 12, 12), "gap": _px(16),
     })
-    side_elements: list[dict[str, Any]] = [_heading("Як зв’язатися", ds.text, ds, level="h3", size=22)]
-    if pairs:
-        for title, body in pairs[:4]:
-            side_elements.append(_heading(title, ds.primary, ds, level="h4", size=18))
-            if body:
-                side_elements.append(_text(body, ds.muted, ds, size=15))
-    if section.cta_label:
-        side_elements.append(_button(section.cta_label, section.cta_url or "#", ds))
+    side_elements: list[dict[str, Any]] = [_heading("Як зв’язатися", ds.text, ds, level="h3", size=24)]
+    used: set[str] = set()
+    for i, (title, body) in enumerate(pairs[:4]):
+        row_children = [_icon(choose_icon(f"{title} {body}", i, used), ds.accent, classes="tai-icon tai-contact-icon"),
+                        _container([_heading(title, ds.primary, ds, level="h4", size=18)] +
+                                   ([_text(body, ds.muted, ds, size=15)] if body else []),
+                                   {"content_width": "full", "padding": _box(0, 0, 0, 0), "gap": _px(2)})]
+        side_elements.append(_container(row_children, {
+            "content_width": "full", "flex_direction": "row", "gap": _px(14), "padding": _box(0, 0, 0, 0),
+            "css_classes": "tai-contact-row",
+        }))
+    side_elements.extend(_actions(section, ds))
     right = _container(side_elements, {
         "content_width": "full", "width": _pct(44), "width_mobile": _pct(100),
-        "background_background": "classic", "background_color": ds.surface,
-        "padding": _box(30, 30, 30, 30), "border_radius": _box(ds.radius, ds.radius, ds.radius, ds.radius),
-        "gap": _px(10),
+        "background_background": "classic", "background_color": _card_surface(section, ds),
+        "padding": _box(34, 34, 34, 34), "border_radius": _box(ds.radius, ds.radius, ds.radius, ds.radius),
+        "gap": _px(16), "css_classes": "tai-contact-panel",
     })
     row = _container([left, right], {
         "content_width": "boxed", "flex_direction": "row", "flex_direction_mobile": "column",
-        "gap": _px(36), "align_items": "center", "padding": _box(0, 0, 0, 0),
+        "gap": _px(48), "align_items": "center", "padding": _box(0, 0, 0, 0),
     })
     return _section_shell(section, [row], ds)
 
 
-def cta(section: SectionContentSpec, ds: DesignSystem) -> dict[str, Any]:
-    body = _intro(section, ds)
-    if section.cta_label:
-        body.append(_button(section.cta_label, section.cta_url or "#", ds, accent=True))
+def cta(section: SectionContentSpec, ds: DesignSystem, *, emphasis: str = "dramatic") -> dict[str, Any]:
+    _, ink, _ = _colors(section, ds)
+    body = _intro(section, ds, emphasis=emphasis)
+    # Bigger closing statement; CTA bands are the page's final decision moment.
+    for widget in body:
+        if widget.get("widgetType") == "heading" and widget["settings"].get("header_size") == "h2":
+            _scaled(widget["settings"], "typography_font_size", "h2-display")
+            widget["settings"]["title"] = _emphasize(section.heading)
+    body.extend(_actions(section, ds, accent=True, ink=ink))
     inner = _container(body, {
-        "content_width": "boxed", "align_items": "center", "padding": _box(6, 6, 6, 6), "gap": _px(18),
+        "content_width": "boxed", "align_items": "center", "padding": _box(6, 6, 6, 6), "gap": _px(20),
+        "css_classes": "tai-cta-panel",
     })
     # Honor Creative Director surface: do not force all CTA sections dark.
     return _section_shell(section, [inner], ds)
 
 
-def simple_content(section: SectionContentSpec, ds: DesignSystem) -> dict[str, Any]:
-    body = _intro(section, ds)
+def simple_content(section: SectionContentSpec, ds: DesignSystem, *, emphasis: str = "balanced",
+                   presentation: str = "grid") -> dict[str, Any]:
+    body: list[dict[str, Any]] = [_section_header(section, ds, emphasis=emphasis)]
     if section.items:
         pairs = _split_items(section.items)
-        body.append(_container([_surface_card(t, b, ds, width=48 if len(pairs) <= 2 else 31) for t, b in pairs], {
+        used: set[str] = set()
+        body.append(_container([_surface_card(t, b, ds, width=48 if len(pairs) <= 2 else 31, index=i,
+                                              variant="content", presentation=presentation,
+                                              icon=choose_icon(f"{t} {b}", i, used),
+                                              surface=_card_surface(section, ds))
+                                for i, (t, b) in enumerate(pairs)], {
             "content_width": "full", "flex_direction": "row", "flex_wrap": "wrap",
-            "flex_direction_mobile": "column", "gap": _px(18), "padding": _box(8, 0, 8, 0),
+            "flex_direction_mobile": "column", "gap": _px(20), "padding": _box(8, 0, 8, 0),
+            "css_classes": f"tai-card-grid tai-card-grid-content tai-cards-{presentation} tai-count-{min(len(pairs), 6)}",
         }))
-    if section.cta_label:
-        body.append(_button(section.cta_label, section.cta_url or "#", ds, accent=section.style_variant == "dark"))
+    body.extend(_actions(section, ds, accent=section.style_variant == "dark"))
     return _section_shell(section, body, ds)
+
+
+def balance_rhythm(specs: list[SectionContentSpec]) -> list[SectionContentSpec]:
+    """Avoid three-plus identical background bands in a row (the 'flat
+    document' look). Only light variants are alternated; an explicit dark or
+    accent choice from the Creative Director is never changed."""
+    out: list[SectionContentSpec] = []
+    for index, spec in enumerate(specs):
+        if (index >= 2 and spec.style_variant in {"default", "soft"}
+                and out[-1].style_variant == spec.style_variant == out[-2].style_variant):
+            spec = spec.model_copy(update={"style_variant": "soft" if spec.style_variant == "default" else "default"})
+        out.append(spec)
+    return out
+
+
+DEFAULT_PRESENTATION = {"process": "timeline", "benefits": "bento", "trust": "list", "services": "grid",
+                        "team": "grid", "stats": "grid", "content": "grid"}
 
 
 COMPONENTS = {
@@ -460,6 +767,7 @@ COMPONENTS = {
     "contact": contact,
     "cta": cta,
     "content": simple_content,
+    "statement": statement,
 }
 
 
@@ -529,6 +837,8 @@ def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem, media: li
     # Unique, valid Creative Director headings pass through unchanged.
     seen_headings: set[str] = set()
     used_concepts: set[str] = set()
+    used_anchors: set[str] = set()
+    specs = balance_rhythm(list(specs))
     for index, section in enumerate(specs):
         key = " ".join(section.heading.casefold().split())
         if key in seen_headings or (index > 0 and key == page.page_name.casefold()):
@@ -544,6 +854,9 @@ def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem, media: li
             section_type = "hero"
             section = section.model_copy(update={"section_type": "hero"})
         renderer = COMPONENTS.get(section_type, simple_content)
+        planned = section_layout(layout, index)
+        emphasis = planned.heading_emphasis if planned is not None else ("dramatic" if section_type in {"hero", "cta", "statement"} else "balanced")
+        presentation = planned.card_presentation if planned is not None else DEFAULT_PRESENTATION.get(section_type, "grid")
         if section_type == "hero":
             # A typography-only scene must not render an unused photo layer.
             requested_layout = section_layout(layout, index)
@@ -557,14 +870,22 @@ def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem, media: li
                     int(selected_image is not None) + int(secondary_image is not None))
                 element = hero(section, ds,
                     selected_image if resolved_scene.media_count else None,
-                    secondary_image if resolved_scene.media_count == 2 else None)
+                    secondary_image if resolved_scene.media_count == 2 else None, emphasis=emphasis)
             else:
-                element = hero(section, ds, selected_image)
+                element = hero(section, ds, selected_image, emphasis=emphasis)
         elif section_type in {"products", "services", "benefits", "trust", "team", "process", "stats"}:
             element = cards(section, ds, selected_image, live_catalog=live_catalog,
-                            product_names=product_names, h1=(index == 0), product_media=media)
+                            product_names=product_names, h1=(index == 0), product_media=media,
+                            presentation=presentation, emphasis=emphasis)
+        elif renderer is simple_content:
+            element = simple_content(section, ds, emphasis=emphasis, presentation=presentation)
         else:
-            element = renderer(section, ds)
+            element = renderer(section, ds, emphasis=emphasis)
+        # Stable in-page anchors (#products, #process...) let a secondary CTA
+        # scroll to a real section instead of inventing another page.
+        if section_type not in used_anchors and re.fullmatch(r"[a-z]{2,20}", section_type):
+            used_anchors.add(section_type)
+            element["settings"]["_element_id"] = section_type
         # Put editorial AI concepts into distinct, native Elementor Image widgets.
         # These are not WooCommerce product images. Only the home page receives
         # the page-scoped editorial media created for its story/collection.

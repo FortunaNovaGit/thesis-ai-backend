@@ -59,8 +59,8 @@ def test_compiler_uses_distinct_editable_card_classes_without_editor_instruction
             yield from nodes(x.get('elements',[]))
     elements = list(nodes(compile_elementor_page(page, DesignSystem(), product_names=['Асорті 16 цукерок'])))
     classes = [x.get('settings',{}).get('css_classes','') for x in elements]
-    assert 'tai-card-grid tai-card-grid-process' in classes
-    assert 'tai-feature-card tai-feature-card-process' in classes
+    assert any(c.startswith('tai-card-grid tai-card-grid-process') for c in classes)
+    assert any(c.startswith('tai-feature-card tai-feature-card-process') for c in classes)
     rendered = ' '.join(str(x.get('settings',{}).get('editor','')) for x in elements)
     assert 'Чернетка товару' not in rendered and 'додайте фотографію' not in rendered
 

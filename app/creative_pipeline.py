@@ -20,7 +20,7 @@ from .models import (
 
 SECTION_KINDS = Literal[
     "hero", "services", "benefits", "trust", "team", "process", "stats",
-    "faq", "content", "booking", "contact", "cta", "products",
+    "faq", "content", "booking", "contact", "cta", "products", "statement",
 ]
 
 
@@ -38,8 +38,8 @@ class CreativeFoundation(BaseModel):
         ids = [c.id for c in self.candidates]
         if len(ids) != len(set(ids)) or self.selected_direction_id not in ids:
             raise ValueError("selected_direction_id must reference one unique candidate")
-        from .design_safety import accessible_design_palette
-        self.design_system = accessible_design_palette(self.design_system)
+        from .design_safety import accessible_design_palette, cyrillic_safe_fonts
+        self.design_system = cyrillic_safe_fonts(accessible_design_palette(self.design_system))
         return self
 
 
@@ -53,12 +53,14 @@ class CreativeSection(BaseModel):
     items: list[str] = Field(default_factory=list, max_length=8)
     cta_label: str | None = Field(default=None, max_length=100)
     cta_url: str | None = Field(default=None, max_length=256)
+    secondary_cta_label: str | None = Field(default=None, max_length=60)
+    secondary_cta_url: str | None = Field(default=None, max_length=256)
     style_variant: Literal["default", "soft", "accent", "dark"] = "default"
     # Elementor V3-native controls, not arbitrary CSS. Index is assigned by compiler.
     composition: Literal["split", "stacked", "centered", "offset"]
     visual_treatment: Literal["abstract", "typography", "media"]
     surface_treatment: Literal["canvas", "tinted", "bordered"]
-    card_presentation: Literal["grid", "bento", "list"]
+    card_presentation: Literal["grid", "bento", "list", "timeline"]
     heading_emphasis: Literal["calm", "balanced", "dramatic"] = "balanced"
     motif: Literal["none", "halo", "lines", "frame", "gradient"] = "none"
     content_alignment: Literal["start", "center"] = "start"
@@ -98,6 +100,11 @@ class CreativePage(BaseModel):
                 raise ValueError(f"section {index} uses a generic navigation label as headline: {section.headline!r}")
             if section.cta_label and not safe_cta_url(section.cta_url):
                 raise ValueError(f"section {index} has an unsafe or missing CTA destination")
+            if section.secondary_cta_label and not safe_cta_url(section.secondary_cta_url):
+                raise ValueError(f"section {index} has an unsafe or missing secondary CTA destination")
+            if (section.secondary_cta_label and section.cta_label and
+                    canonical(section.secondary_cta_label) == canonical(section.cta_label)):
+                raise ValueError(f"section {index} repeats the primary CTA label as secondary CTA")
             if looks_like_planning(section.headline) or looks_like_planning(section.body):
                 raise ValueError(f"section {index} includes editor/planning copy")
             if looks_like_filler(section.headline) or looks_like_filler(section.body):
@@ -154,7 +161,7 @@ def compose_experience(
         # semantic fulfillment. The reconciler must not hide such failures.
         missing = sorted({x for x in required_kinds if x in {
             "hero", "services", "benefits", "trust", "team", "process",
-            "stats", "faq", "content", "booking", "contact", "cta", "products",
+            "stats", "faq", "content", "booking", "contact", "cta", "products", "statement",
         } and x not in available})
         if missing:
             raise ValueError(f"Creative page {intent.slug} missing requested section types: {missing}")
@@ -170,6 +177,8 @@ def compose_experience(
                 items=section.items,
                 cta_label=section.cta_label,
                 cta_url=section.cta_url,
+                secondary_cta_label=section.secondary_cta_label if section.secondary_cta_label and section.cta_label else None,
+                secondary_cta_url=section.secondary_cta_url if section.secondary_cta_label and section.cta_label else None,
                 style_variant=section.style_variant,
             ))
             layout_sections.append(SectionLayoutSpec(

@@ -1,0 +1,273 @@
+/* Thesis AI v0.12.0 — Rich Visual System.
+   Loaded after front.css + visual-composer.css, ONLY on AI-owned pages.
+   Every rule is scoped to sections compiled by v0.12 (.tai-rich), so pages
+   built by older versions keep their previous look. Static, reviewed CSS —
+   nothing here is written by an LLM. Colors come from the site design tokens
+   (--tai-*) printed by the Bridge; color-mix() derives tints and lines. */
+
+body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich{
+  --r-ink:var(--tai-text,#1d1712);
+  --r-muted:var(--tai-muted,#6b5a4e);
+  --r-accent:var(--tai-accent,#b8864b);
+  --r-primary:var(--tai-primary,#3d2a20);
+  --r-paper:var(--tai-bg,#fbf7f1);
+  --r-surface:var(--tai-surface,#f1e8dc);
+  --r-line:color-mix(in srgb,var(--r-ink) 13%,transparent);
+  --r-line-strong:color-mix(in srgb,var(--r-ink) 22%,transparent);
+  --r-glow:color-mix(in srgb,var(--r-accent) 26%,transparent);
+  --r-tint:color-mix(in srgb,var(--r-accent) 12%,transparent);
+  --r-radius:var(--tai-radius,14px);
+  --r-shadow:0 1px 2px color-mix(in srgb,var(--r-ink) 6%,transparent),0 24px 60px -28px color-mix(in srgb,var(--r-ink) 34%,transparent);
+  --r-ease:cubic-bezier(.2,.7,.2,1);
+  --r-width:min(100%,var(--tai-layout-width,1200px));
+  position:relative;isolation:isolate;overflow:clip!important;
+}
+/* Dark / accent bands: lines and glows are drawn in light ink. */
+body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich:is(.tai-tone-dark,.tai-tone-accent){
+  --r-line:color-mix(in srgb,#fff 16%,transparent);
+  --r-line-strong:color-mix(in srgb,#fff 28%,transparent);
+  --r-tint:color-mix(in srgb,#fff 8%,transparent);
+}
+body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich>.e-con{width:var(--r-width)!important;max-width:var(--r-width)!important;margin-inline:auto!important;position:relative;z-index:1}
+
+/* Subtle paper grain on soft bands: depth without imagery. */
+body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich.tai-tone-soft::before{
+  content:"";position:absolute;inset:0;z-index:0;pointer-events:none;opacity:.35;mix-blend-mode:multiply;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.35  0 0 0 0 0.27  0 0 0 0 0.2  0 0 0 .22 0'/></filter><rect width='160' height='160' filter='url(%23n)'/></svg>");
+}
+
+/* ---------- Typography ---------- */
+body.thesis-ai-generated .elementor .tai-rich .tai-display .elementor-heading-title{letter-spacing:-.022em;text-wrap:balance;hyphens:manual!important;overflow-wrap:break-word}
+body.thesis-ai-generated .elementor .tai-rich .tai-h1 .elementor-heading-title{
+  font-size:clamp(2.6rem,1.4rem + 4.6vw,5.4rem)!important;line-height:1.02!important;letter-spacing:-.03em!important;max-width:16ch!important}
+body.thesis-ai-generated .elementor .tai-rich .tai-h2 .elementor-heading-title{
+  font-size:clamp(2rem,1.3rem + 2.6vw,3.5rem)!important;line-height:1.06!important;max-width:20ch}
+body.thesis-ai-generated .elementor .tai-rich :is(.tai-statement-title,.tai-cta-panel .tai-h2) .elementor-heading-title{
+  font-size:clamp(2.3rem,1.3rem + 3.6vw,4.6rem)!important;max-width:18ch;margin-inline:auto}
+body.thesis-ai-generated .elementor .tai-rich .tai-em{font-style:italic;font-weight:500;color:var(--r-accent)}
+body.thesis-ai-generated .elementor .tai-rich.tai-tone-accent .tai-em{color:inherit;opacity:.82}
+body.thesis-ai-generated .elementor .tai-rich .tai-lead{max-width:58ch}
+body.thesis-ai-generated .elementor .tai-rich .tai-lead p{line-height:1.65}
+body.thesis-ai-generated .elementor .tai-rich .tai-eyebrow .elementor-heading-title{
+  display:inline-flex;align-items:center;gap:12px;letter-spacing:.2em;font-size:12px!important;text-transform:uppercase}
+body.thesis-ai-generated .elementor .tai-rich .tai-eyebrow:not(.tai-eyebrow-pill) .elementor-heading-title::before{
+  content:"";width:32px;height:1px;background:currentColor;opacity:.7}
+body.thesis-ai-generated .elementor .tai-rich .tai-eyebrow-pill .elementor-heading-title{
+  padding:9px 16px;border:1px solid color-mix(in srgb,var(--r-accent) 45%,transparent);border-radius:999px;background:var(--r-tint)}
+body.thesis-ai-generated .elementor .tai-rich .tai-section-head{max-width:780px;gap:18px!important}
+body.thesis-ai-generated .elementor .tai-rich .tai-section-head-center,
+body.thesis-ai-generated .elementor .tai-rich.tai-content-center .tai-section-head{margin-inline:auto;align-items:center;text-align:center}
+
+/* ---------- Buttons ---------- */
+body.thesis-ai-generated .elementor .tai-rich .tai-btn .elementor-button{
+  padding:18px 30px!important;font-size:15px!important;letter-spacing:.02em;line-height:1.1;
+  transition:transform .35s var(--r-ease),box-shadow .35s var(--r-ease),background-color .25s}
+body.thesis-ai-generated .elementor .tai-rich .tai-btn-primary .elementor-button{box-shadow:0 14px 30px -14px color-mix(in srgb,var(--r-primary) 70%,transparent)}
+body.thesis-ai-generated .elementor .tai-rich .tai-btn-primary .elementor-button-text::after{content:"→";display:inline-block;margin-left:12px;transition:transform .35s var(--r-ease)}
+body.thesis-ai-generated .elementor .tai-rich .tai-btn .elementor-button:hover{transform:translateY(-2px)}
+body.thesis-ai-generated .elementor .tai-rich .tai-btn-primary .elementor-button:hover .elementor-button-text::after{transform:translateX(4px)}
+body.thesis-ai-generated .elementor .tai-rich .tai-btn-ghost .elementor-button{
+  background:transparent!important;box-shadow:inset 0 0 0 1.5px var(--r-line-strong)!important}
+body.thesis-ai-generated .elementor .tai-rich .tai-btn-ghost .elementor-button:hover{box-shadow:inset 0 0 0 1.5px currentColor!important}
+body.thesis-ai-generated .elementor .tai-rich .tai-btn .elementor-button:focus-visible{outline:2px solid var(--r-accent);outline-offset:3px}
+body.thesis-ai-generated .elementor .tai-rich .tai-actions{gap:14px!important}
+
+/* ---------- Icons ---------- */
+body.thesis-ai-generated .elementor .tai-rich .tai-icon .elementor-icon{
+  display:grid!important;place-items:center;width:54px;height:54px;font-size:21px!important;border-radius:50%;
+  background:var(--r-tint);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--r-accent) 30%,transparent)}
+body.thesis-ai-generated .elementor .tai-rich .tai-icon .elementor-icon svg{width:1em;height:1em}
+body.thesis-ai-generated .elementor .tai-rich .tai-highlight-icon .elementor-icon{width:44px;height:44px;font-size:17px!important}
+
+/* ---------- Hero ---------- */
+body.thesis-ai-generated .elementor .tai-rich.tai-kind-hero::before{
+  content:"";position:absolute;z-index:0;pointer-events:none;inset:0;
+  background:
+    radial-gradient(55% 60% at 88% 12%,var(--r-glow),transparent 70%),
+    radial-gradient(40% 45% at 4% 96%,color-mix(in srgb,var(--r-primary) 12%,transparent),transparent 70%)}
+body.thesis-ai-generated .elementor .tai-rich.tai-kind-hero.tai-visual-typography::after{
+  /* Decorative orbit lines — abstract geometry, not a product placeholder. */
+  content:"";position:absolute;z-index:0;pointer-events:none;
+  width:clamp(320px,46vw,720px);aspect-ratio:1;right:calc(-1 * clamp(80px,10vw,180px));top:50%;translate:0 -50%;
+  border-radius:50%;
+  background:
+    radial-gradient(circle at 50% 50%,transparent 0 31%,var(--r-line) 31% calc(31% + 1px),transparent calc(31% + 1px) 47%,var(--r-line) 47% calc(47% + 1px),transparent calc(47% + 1px) 63%,color-mix(in srgb,var(--r-accent) 40%,transparent) 63% calc(63% + 1px),transparent calc(63% + 1px)),
+    radial-gradient(circle at 74% 22%,var(--r-accent) 0 1.4%,transparent 1.6%),
+    radial-gradient(circle at 18% 70%,var(--r-primary) 0 .9%,transparent 1.1%);
+  animation:tai-orbit 60s linear infinite}
+body.thesis-ai-generated .elementor .tai-rich.tai-kind-hero.tai-visual-typography .tai-hero-copy{max-width:1040px!important}
+body.thesis-ai-generated .elementor .tai-rich.tai-kind-hero.tai-visual-typography .tai-h1 .elementor-heading-title{max-width:15ch!important;font-size:clamp(2.8rem,1.2rem + 5.6vw,6.2rem)!important}
+body.thesis-ai-generated .elementor .tai-rich .tai-hero-copy{gap:26px!important}
+body.thesis-ai-generated .elementor .tai-rich .tai-hero-highlights{
+  display:grid!important;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:28px!important;
+  margin-top:clamp(16px,3vw,40px);padding-top:28px!important;border-top:1px solid var(--r-line);width:100%!important}
+body.thesis-ai-generated .elementor .tai-rich .tai-hero-highlights>.e-con{width:100%!important;display:grid!important;grid-template-columns:44px minmax(0,1fr);column-gap:14px;row-gap:4px;align-items:start}
+body.thesis-ai-generated .elementor .tai-rich .tai-hero-highlights>.e-con>.tai-highlight-icon{grid-row:span 2}
+body.thesis-ai-generated .elementor .tai-rich .tai-highlight-text p{line-height:1.5;margin:0}
+/* v0.10 typographic scene drew a left rule; v0.12 uses the highlight strip instead. */
+body.thesis-ai-generated .elementor .tai-rich.tai-vc.tai-scene-typographic .tai-hero-copy{border:0!important;padding-left:0!important;padding-right:0!important}
+/* Hero with a real photo: framed, tall, with an offset accent outline. */
+body.thesis-ai-generated .elementor .tai-rich.tai-kind-hero:not(.tai-visual-typography) .tai-hero-photo{border-radius:calc(var(--r-radius) * 1.6);overflow:hidden}
+body.thesis-ai-generated .elementor .tai-rich.tai-kind-hero:not(.tai-visual-typography)>.tai-hero-highlights{margin-top:0}
+body.thesis-ai-generated .elementor .tai-rich.tai-vc:not(.tai-visual-typography) .tai-hero-grid{min-height:0!important}
+@keyframes tai-orbit{to{rotate:360deg}}
+
+/* ---------- Card grids (shared) ---------- */
+body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich .tai-card-grid.tai-card-grid{
+  display:grid!important;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr))!important;gap:20px!important}
+body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich .tai-card-grid.tai-card-grid>.e-con{width:100%!important;min-width:0!important;grid-column:auto!important;grid-row:auto!important;min-height:0!important}
+body.thesis-ai-generated .elementor .tai-rich .tai-card{
+  position:relative;border:1px solid var(--r-line);box-shadow:none;
+  transition:transform .45s var(--r-ease),box-shadow .45s var(--r-ease),border-color .3s}
+body.thesis-ai-generated .elementor .tai-rich .tai-card:hover{transform:translateY(-4px);box-shadow:var(--r-shadow);border-color:color-mix(in srgb,var(--r-accent) 40%,transparent)}
+body.thesis-ai-generated .elementor .tai-rich:is(.tai-tone-dark,.tai-tone-accent) .tai-card{background:color-mix(in srgb,#fff 6%,transparent)!important}
+body.thesis-ai-generated .elementor .tai-rich .tai-card-text p{margin:0}
+body.thesis-ai-generated .elementor .tai-rich .tai-card-index .elementor-heading-title{font-style:italic;line-height:1!important}
+/* Older numbered ::before counters would duplicate our numerals. */
+body.thesis-ai-generated .elementor .tai-rich .tai-card-grid>.e-con:not(.tai-product-card-text-only)::before{content:none!important}
+
+/* Bento: one hero card in the primary color + quieter companions. */
+@media (min-width:768px){
+  body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich .tai-card-grid.tai-cards-bento.tai-count-3{grid-template-columns:minmax(0,1.15fr) minmax(0,1fr)!important}
+  body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich .tai-card-grid.tai-cards-bento.tai-count-3>.e-con.tai-card:first-child{grid-row:span 2!important}
+  body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich .tai-card-grid.tai-cards-bento.tai-count-4{grid-template-columns:minmax(0,1.2fr) repeat(2,minmax(0,1fr))!important}
+  body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich .tai-card-grid.tai-cards-bento.tai-count-4>.e-con.tai-card:first-child{grid-row:span 2!important}
+  body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich .tai-card-grid.tai-cards-bento.tai-count-4>.e-con.tai-card:last-child{grid-column:span 2!important}
+  body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich .tai-card-grid.tai-cards-bento:is(.tai-count-5,.tai-count-6){grid-template-columns:repeat(3,minmax(0,1fr))!important}
+  body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich .tai-card-grid.tai-cards-bento:is(.tai-count-5,.tai-count-6)>.e-con.tai-card:first-child{grid-column:span 2!important}
+}
+body.thesis-ai-generated .elementor .tai-rich .tai-cards-bento>.e-con.tai-card:first-child{
+  background:var(--r-primary)!important;border-color:transparent;justify-content:flex-end;min-height:clamp(260px,30vw,400px)!important;overflow:hidden;
+  padding:clamp(28px,3.4vw,46px)!important}
+body.thesis-ai-generated .elementor .tai-rich .tai-cards-bento>.e-con.tai-card:first-child::after{
+  content:"";position:absolute;inset:auto -20% -45% auto;width:85%;aspect-ratio:1;border-radius:50%;pointer-events:none;
+  background:radial-gradient(circle,color-mix(in srgb,var(--r-accent) 55%,transparent),transparent 65%);opacity:.75}
+body.thesis-ai-generated .elementor .tai-rich .tai-cards-bento>.e-con.tai-card:first-child :is(.elementor-heading-title,p){color:var(--tai-on-primary,#fff)!important;position:relative;z-index:1}
+body.thesis-ai-generated .elementor .tai-rich .tai-cards-bento>.e-con.tai-card:first-child .tai-card-title .elementor-heading-title{font-size:clamp(1.6rem,1.1rem + 1.4vw,2.4rem)!important}
+body.thesis-ai-generated .elementor .tai-rich .tai-cards-bento>.e-con.tai-card:first-child .tai-card-icon{position:absolute;top:clamp(26px,3vw,40px);left:clamp(28px,3.4vw,46px);z-index:1}
+body.thesis-ai-generated .elementor .tai-rich .tai-cards-bento>.e-con.tai-card:first-child .tai-icon .elementor-icon{background:color-mix(in srgb,#fff 12%,transparent);box-shadow:none}
+
+/* List: editorial rows with large italic numerals. */
+body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich .tai-card-grid.tai-cards-list{grid-template-columns:minmax(0,1fr)!important;gap:0!important;border-top:1px solid var(--r-line)}
+body.thesis-ai-generated .elementor .tai-rich .tai-cards-list>.e-con.tai-card{
+  display:grid!important;grid-template-columns:clamp(64px,9vw,120px) minmax(0,1fr);align-items:baseline;
+  background:transparent!important;border:0;border-bottom:1px solid var(--r-line);border-radius:0!important;padding:30px 0!important}
+body.thesis-ai-generated .elementor .tai-rich .tai-cards-list>.e-con.tai-card:hover{transform:none;box-shadow:none}
+body.thesis-ai-generated .elementor .tai-rich .tai-cards-list .tai-card-body{display:grid!important;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:8px 40px!important}
+@media (max-width:767px){body.thesis-ai-generated .elementor .tai-rich .tai-cards-list .tai-card-body{grid-template-columns:minmax(0,1fr)}}
+
+/* Timeline: numbered steps joined by a hairline. */
+body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich .tai-card-grid.tai-cards-timeline{
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr))!important;gap:clamp(20px,3vw,40px)!important;position:relative;padding-top:8px!important}
+body.thesis-ai-generated .elementor .tai-rich .tai-cards-timeline>.e-con.tai-card{background:transparent!important;border:0;padding:0!important;gap:14px!important}
+body.thesis-ai-generated .elementor .tai-rich .tai-cards-timeline>.e-con.tai-card:hover{transform:none;box-shadow:none}
+body.thesis-ai-generated .elementor .tai-rich .tai-cards-timeline .tai-card-index .elementor-heading-title{
+  display:grid;place-items:center;width:64px;height:64px;border-radius:50%;font-size:24px!important;font-style:normal;
+  background:var(--r-paper);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--r-accent) 55%,transparent);position:relative;z-index:1}
+body.thesis-ai-generated .elementor .tai-rich.tai-tone-soft .tai-cards-timeline .tai-card-index .elementor-heading-title{background:var(--r-surface)}
+@media (min-width:768px){
+  body.thesis-ai-generated .elementor .tai-rich .tai-cards-timeline::before{
+    content:"";position:absolute;left:32px;right:32px;top:40px;height:1px;z-index:0;
+    background:linear-gradient(90deg,var(--r-accent),var(--r-line-strong) 60%,transparent)}
+}
+@media (max-width:767px){
+  body.thesis-ai-generated .elementor .tai-rich .tai-cards-timeline>.e-con.tai-card{padding-left:84px!important;min-height:64px}
+  body.thesis-ai-generated .elementor .tai-rich .tai-cards-timeline .tai-card-index{position:absolute;left:0;top:0}
+  body.thesis-ai-generated .elementor .tai-rich .tai-cards-timeline::before{content:"";position:absolute;left:32px;top:16px;bottom:16px;width:1px;background:var(--r-line-strong)}
+}
+
+/* ---------- Product teasers (text-only = honest, no fake photo) ---------- */
+body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich .tai-card-grid.tai-card-grid>.e-con.tai-product-card{
+  overflow:hidden;min-height:clamp(240px,24vw,320px)!important;justify-content:flex-end;
+  background:var(--r-paper)!important;border:1px solid var(--r-line)!important;border-radius:var(--r-radius)!important}
+body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich.tai-tone-default .tai-card-grid.tai-card-grid>.e-con.tai-product-card{background:var(--r-surface)!important}
+body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich .tai-card-grid.tai-card-grid>.e-con.tai-product-card:hover{transform:translateY(-4px);box-shadow:var(--r-shadow)}
+body.thesis-ai-generated .elementor .tai-rich .tai-product-card-text-only::before{
+  /* Abstract ornament only: concentric rings + dotted field, never a fake photo. */
+  content:"";position:absolute;inset:0 0 auto 0;height:62%;z-index:0;pointer-events:none;
+  background:
+    radial-gradient(circle at 80% 44%,transparent 0 17%,color-mix(in srgb,var(--r-accent) 55%,transparent) 17% calc(17% + 1.5px),transparent calc(17% + 1.5px) 27%,color-mix(in srgb,var(--r-accent) 30%,transparent) 27% calc(27% + 1px),transparent calc(27% + 1px)),
+    radial-gradient(circle at 80% 44%,color-mix(in srgb,var(--r-primary) 85%,transparent) 0 11%,transparent 11.5%),
+    radial-gradient(circle,color-mix(in srgb,var(--r-accent) 45%,transparent) 0 1.6px,transparent 2px) 0 0/22px 22px,
+    linear-gradient(160deg,var(--r-tint),transparent 85%);
+  -webkit-mask:linear-gradient(#000 55%,transparent);mask:linear-gradient(#000 55%,transparent)}
+body.thesis-ai-generated .elementor .tai-rich .tai-product-card-text-only:nth-child(2n)::before{background-position:0 0,0 0,11px 11px,0 0;filter:hue-rotate(-12deg) saturate(1.15)}
+body.thesis-ai-generated .elementor .tai-rich .tai-product-card>*{position:relative;z-index:1}
+body.thesis-ai-generated .elementor .tai-rich .tai-product-index .elementor-heading-title{letter-spacing:.18em;text-transform:uppercase;font-size:12px!important}
+body.thesis-ai-generated .elementor .tai-rich .tai-product-title .elementor-heading-title{font-size:clamp(1.6rem,1.2rem + 1vw,2.2rem)!important;line-height:1.1!important}
+
+/* ---------- Statement ---------- */
+body.thesis-ai-generated .elementor .tai-rich .tai-statement{text-align:center;align-items:center!important;max-width:980px!important}
+body.thesis-ai-generated .elementor .tai-rich .tai-statement::before{
+  content:"✦";display:block;font-size:26px;line-height:1;color:var(--r-accent);margin-bottom:6px}
+body.thesis-ai-generated .elementor .tai-rich .tai-statement .tai-eyebrow .elementor-heading-title::before{display:none}
+body.thesis-ai-generated .elementor .tai-rich .tai-statement-text{margin-inline:auto}
+
+/* ---------- FAQ (native <details>) ---------- */
+body.thesis-ai-generated .elementor .tai-rich .tai-faq-grid{display:grid!important;grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr);gap:clamp(28px,5vw,80px)!important;align-items:start}
+body.thesis-ai-generated .elementor .tai-rich .tai-faq-grid>.e-con{width:100%!important}
+@media (min-width:1025px){body.thesis-ai-generated .elementor .tai-rich .tai-faq-intro{position:sticky;top:110px}}
+@media (max-width:900px){body.thesis-ai-generated .elementor .tai-rich .tai-faq-grid{grid-template-columns:minmax(0,1fr)}}
+body.thesis-ai-generated .elementor .tai-rich .tai-faq-list{gap:0!important;border-top:1px solid var(--r-line)}
+body.thesis-ai-generated .elementor .tai-rich .tai-faq-item{border-bottom:1px solid var(--r-line)}
+body.thesis-ai-generated .elementor .tai-rich .tai-faq-item summary{
+  list-style:none;cursor:pointer;display:flex;justify-content:space-between;gap:24px;align-items:center;
+  padding:24px 0;font-family:var(--tai-heading-font,inherit);font-size:clamp(1.15rem,1rem + .5vw,1.45rem);font-weight:600;line-height:1.3}
+body.thesis-ai-generated .elementor .tai-rich .tai-faq-item summary::-webkit-details-marker{display:none}
+body.thesis-ai-generated .elementor .tai-rich .tai-faq-item summary::after{
+  content:"+";flex:none;display:grid;place-items:center;width:36px;height:36px;border-radius:50%;
+  font:400 22px/1 system-ui,sans-serif;color:var(--r-accent);box-shadow:inset 0 0 0 1px var(--r-line-strong);transition:rotate .35s var(--r-ease),background-color .3s}
+body.thesis-ai-generated .elementor .tai-rich .tai-faq-item[open] summary::after{rotate:45deg;background:var(--r-tint)}
+body.thesis-ai-generated .elementor .tai-rich .tai-faq-item summary:focus-visible{outline:2px solid var(--r-accent);outline-offset:4px}
+body.thesis-ai-generated .elementor .tai-rich .tai-faq-item p{margin:0 0 24px;max-width:60ch;color:var(--r-muted);line-height:1.65}
+body.thesis-ai-generated .elementor .tai-rich.tai-tone-dark .tai-faq-item p{color:inherit;opacity:.8}
+
+/* ---------- CTA band ---------- */
+body.thesis-ai-generated .elementor .tai-rich.tai-kind-cta .tai-cta-panel{text-align:center;padding-block:clamp(12px,3vw,40px)!important}
+body.thesis-ai-generated .elementor .tai-rich.tai-kind-cta .tai-cta-panel .tai-lead{margin-inline:auto}
+body.thesis-ai-generated .elementor .tai-rich.tai-kind-cta .tai-eyebrow .elementor-heading-title::before{display:none}
+body.thesis-ai-generated .elementor .tai-rich.tai-kind-cta::before,
+body.thesis-ai-generated .elementor .tai-rich.tai-kind-cta::after{
+  content:"";position:absolute;z-index:0;pointer-events:none;border-radius:50%;aspect-ratio:1;
+  border:1px solid color-mix(in srgb,var(--r-accent) 45%,transparent)}
+body.thesis-ai-generated .elementor .tai-rich.tai-kind-cta::before{width:clamp(260px,34vw,520px);left:-8%;top:-40%}
+body.thesis-ai-generated .elementor .tai-rich.tai-kind-cta::after{width:clamp(200px,24vw,380px);right:-5%;bottom:-45%;
+  background:radial-gradient(circle,var(--r-glow),transparent 70%)}
+
+/* ---------- Contact / booking ---------- */
+body.thesis-ai-generated .elementor .tai-rich :is(.tai-contact-panel,.tai-form-panel){border:1px solid var(--r-line);box-shadow:var(--r-shadow)}
+body.thesis-ai-generated .elementor .tai-rich .tai-contact-row{align-items:flex-start!important}
+body.thesis-ai-generated .elementor .tai-rich .tai-contact-icon .elementor-icon{width:44px;height:44px;font-size:16px!important}
+body.thesis-ai-generated .elementor .tai-rich .wpcf7 :is(input:not([type=submit]),textarea,select){
+  width:100%;box-sizing:border-box;padding:15px 18px;border:1px solid var(--r-line-strong);border-radius:calc(var(--r-radius) * .7);
+  background:var(--r-paper);color:var(--r-ink);font:inherit;transition:border-color .25s,box-shadow .25s}
+body.thesis-ai-generated .elementor .tai-rich .wpcf7 :is(input,textarea):focus{outline:none;border-color:var(--r-accent);box-shadow:0 0 0 4px var(--r-tint)}
+body.thesis-ai-generated .elementor .tai-rich .wpcf7 label{display:block;font-weight:600;font-size:14px;color:var(--r-ink)}
+body.thesis-ai-generated .elementor .tai-rich .wpcf7 input[type=submit]{
+  cursor:pointer;border:0;padding:17px 32px;border-radius:var(--r-radius);background:var(--r-primary);color:var(--tai-on-primary,#fff);font:600 15px/1 inherit}
+
+/* ---------- Motion (progressive, never hides content without support) ---------- */
+@media (prefers-reduced-motion:no-preference){
+  body.thesis-ai-generated .elementor .tai-rich.tai-kind-hero .tai-hero-copy>*{animation:tai-rise .9s var(--r-ease) both}
+  body.thesis-ai-generated .elementor .tai-rich.tai-kind-hero .tai-hero-copy>:nth-child(2){animation-delay:.08s}
+  body.thesis-ai-generated .elementor .tai-rich.tai-kind-hero .tai-hero-copy>:nth-child(3){animation-delay:.16s}
+  body.thesis-ai-generated .elementor .tai-rich.tai-kind-hero .tai-hero-copy>:nth-child(4){animation-delay:.24s}
+  body.thesis-ai-generated .elementor .tai-rich.tai-kind-hero .tai-hero-copy>:nth-child(n+5){animation-delay:.32s}
+  @supports (animation-timeline:view()){
+    body.thesis-ai-generated .elementor .tai-rich:not(.tai-kind-hero) :is(.tai-section-head,.tai-card,.tai-statement,.tai-faq-item,.tai-cta-panel,.tai-contact-panel,.tai-form-panel){
+      animation:tai-reveal linear both;animation-timeline:view();animation-range:entry 0% entry 55%}
+  }
+}
+@media (prefers-reduced-motion:reduce){
+  body.thesis-ai-generated .elementor .tai-rich *,body.thesis-ai-generated .elementor .tai-rich::after{animation:none!important;transition:none!important}
+}
+@keyframes tai-rise{from{opacity:0;transform:translateY(26px)}to{opacity:1;transform:none}}
+@keyframes tai-reveal{from{opacity:0;transform:translateY(36px)}to{opacity:1;transform:none}}
+
+/* ---------- Mobile rhythm ---------- */
+@media (max-width:767px){
+  body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich{padding-top:clamp(56px,14vw,80px)!important;padding-bottom:clamp(56px,14vw,80px)!important;padding-inline:20px!important}
+  body.thesis-ai-generated .elementor .tai-rich.tai-kind-hero.tai-visual-typography::after{opacity:.5;right:-55%}
+  body.thesis-ai-generated .elementor .tai-rich .tai-actions{flex-direction:column!important;align-items:stretch!important}
+  body.thesis-ai-generated .elementor .tai-rich .tai-actions .elementor-button{width:100%;justify-content:center}
+}

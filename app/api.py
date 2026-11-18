@@ -162,6 +162,8 @@ async def health() -> dict[str, Any]:
         "editorial_quality_gate": "v3_authored_copy_preserved",
         "generative_design": "visual_composer_v1_elementor_v3",
         "visual_composer": "bounded_hero_scenes_v1",
+        "rich_sections": "rich_visual_system_v1",
+        "cyrillic_font_guard": True,
         "media_pipeline": "opt_in_ai_concepts_3_assets_v1",
         "image_generation_enabled": settings.enable_image_generation,
         "image_generation_ready": bool(settings.enable_image_generation and settings.openai_api_key),

@@ -34,6 +34,8 @@ async def inspect(url: str, output: pathlib.Path, storage_state: str | None = No
             launch["executable_path"] = shutil.which("chromium-browser")
         browser = await p.chromium.launch(**launch)
         context_kwargs = {"storage_state": storage_state} if storage_state else {}
+        # v0.12 scroll-reveal animations: capture the final state in full-page shots.
+        context_kwargs["reduced_motion"] = "reduce"
         context = await browser.new_context(**context_kwargs)
         for label, (width, height) in VIEWPORTS.items():
             page = await context.new_page()

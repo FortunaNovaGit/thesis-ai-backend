@@ -3,7 +3,7 @@ Contributors: thesis-prototype
 Tags: ai, elementor, abilities-api, automation, wordpress
 Requires at least: 6.6
 Requires PHP: 8.0
-Stable tag: 0.11.0
+Stable tag: 0.12.0
 License: GPLv2 or later
 
 Controlled local WordPress execution layer for a five-agent master's thesis prototype.
@@ -31,6 +31,12 @@ Version 0.11.0 adds safe generative Elementor section geometry and responsive ar
 6. Keep the builder page open or return later; build state is persisted in WordPress.
 7. Review generated drafts in Elementor.
 8. Publish only after explicit administrator confirmation.
+
+== v0.12.0 Rich Visual System ==
+* New scoped stylesheet assets/rich-sections.css (only AI-owned pages, only sections compiled by backend 0.12).
+* Sanitizer accepts native responsive font sizes, widget CSS classes (_css_classes) and in-page anchors (_element_id).
+* Site design prints --tai-heading-font / --tai-body-font tokens.
+* Requires backend 0.12.0 for the new look; older plans keep their previous look.
 
 == v0.11.0 Hero Visual Composer ==
 

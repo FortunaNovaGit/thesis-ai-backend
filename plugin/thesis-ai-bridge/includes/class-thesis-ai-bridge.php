@@ -92,7 +92,7 @@ final class Thesis_AI_Bridge {
         $luminance = $linear[0] * 0.2126 + $linear[1] * 0.7152 + $linear[2] * 0.0722;
         $on_primary = $luminance > 0.179 ? '#101015' : '#FFFFFF';
         echo "<style id=\"thesis-ai-site-design\">\n";
-        echo ':root{--tai-primary:' . esc_html($primary) . ';--tai-accent:' . esc_html($accent) . ';--tai-bg:' . esc_html($background) . ';--tai-surface:' . esc_html($surface) . ';--tai-text:' . esc_html($text) . ';--tai-muted:' . esc_html($muted) . ';--tai-radius:' . esc_html((string)$radius) . 'px;--tai-on-primary:' . esc_html($on_primary) . ';}';
+        echo ':root{--tai-primary:' . esc_html($primary) . ';--tai-accent:' . esc_html($accent) . ';--tai-bg:' . esc_html($background) . ';--tai-surface:' . esc_html($surface) . ';--tai-text:' . esc_html($text) . ';--tai-muted:' . esc_html($muted) . ';--tai-radius:' . esc_html((string)$radius) . 'px;--tai-on-primary:' . esc_html($on_primary) . ';--tai-heading-font:\'' . esc_html($heading_font) . '\',serif;--tai-body-font:\'' . esc_html($body_font) . '\',sans-serif;}';
         echo 'body.thesis-ai-generated,body.woocommerce-shop{background:var(--tai-bg);color:var(--tai-text);font-family:' . esc_html($body_font) . ',system-ui,sans-serif;}';
         echo 'body.thesis-ai-generated :is(h1,h2,h3,h4,h5,h6,.site-title),body.woocommerce-shop :is(h1,h2,h3,h4,h5,h6,.site-title){font-family:' . esc_html($heading_font) . ',system-ui,sans-serif;}';
         echo 'body.thesis-ai-generated a,body.woocommerce-shop a{color:var(--tai-primary);}';
@@ -136,6 +136,12 @@ final class Thesis_AI_Bridge {
             'thesis-ai-visual-composer',
             plugins_url('assets/visual-composer.css', THESIS_AI_BRIDGE_FILE),
             ['thesis-ai-premium-visuals'], THESIS_AI_BRIDGE_VERSION
+        );
+        // v0.12: richer section system; every rule is scoped to .tai-rich sections.
+        wp_enqueue_style(
+            'thesis-ai-rich-sections',
+            plugins_url('assets/rich-sections.css', THESIS_AI_BRIDGE_FILE),
+            ['thesis-ai-visual-composer'], THESIS_AI_BRIDGE_VERSION
         );
     }
 
@@ -1845,6 +1851,9 @@ final class Thesis_AI_Bridge {
             'secondary_color', 'border_radius', 'space', 'weight', 'style', 'width', 'width_tablet', 'width_mobile', 'css_classes', 'html_tag', 'hide_title', 'page_layout', 'shortcode',
             'padding_tablet', 'padding_mobile', 'gap_tablet', 'gap_mobile', 'flex_direction_tablet', 'flex_direction_mobile',
             'typography_typography', 'typography_font_family', 'typography_font_size', 'typography_font_weight', 'typography_line_height', 'button_text_color', 'button_css_id',
+            // v0.12 Rich Visual System: native responsive type scale, widget CSS classes, in-page anchors.
+            'typography_font_size_tablet', 'typography_font_size_mobile', 'typography_letter_spacing', 'typography_font_style',
+            '_css_classes', '_element_id', 'align_mobile',
         ];
         $clean = [];
         foreach ($settings as $key => $value) {
@@ -1874,7 +1883,18 @@ final class Thesis_AI_Bridge {
                 if ($color) {
                     $clean[$key] = $color;
                 }
-            } elseif ($key === 'css_classes') {
+            } elseif ($key === '_element_id') {
+                // Anchor for in-page CTAs (#products, #process). Lowercase slug only.
+                $anchor = substr(preg_replace('/[^a-z0-9\-]/', '', strtolower((string)$value)) ?? '', 0, 40);
+                if ($anchor !== '') {
+                    $clean[$key] = $anchor;
+                }
+            } elseif ($key === 'typography_font_style') {
+                $style = (string)$value;
+                if (in_array($style, ['normal', 'italic'], true)) {
+                    $clean[$key] = $style;
+                }
+            } elseif ($key === 'css_classes' || $key === '_css_classes') {
                 $classes = preg_split('/\s+/', (string)$value) ?: [];
                 $clean[$key] = implode(' ', array_filter(array_map('sanitize_html_class', $classes)));
             } elseif ($key === 'typography_font_family') {

@@ -59,3 +59,42 @@ def assert_design_palette(ds: DesignSystem) -> None:
             raise ValueError("Invalid font family in design system")
     if not (720 <= ds.container_width <= 1440 and 36 <= ds.section_spacing <= 168 and 0 <= ds.radius <= 48):
         raise ValueError("Design system geometry is outside supported Elementor bounds")
+
+
+# v0.12: Ukrainian sites need Google Fonts that actually contain Cyrillic.
+# Many fashionable Latin-only families (Poppins, DM Sans, Fraunces, Syne...)
+# silently fall back to a system font on Cyrillic text, which is one of the
+# main reasons generated pages looked "dry" and inconsistent.
+CYRILLIC_SERIF = (
+    "Cormorant Garamond", "Cormorant", "Cormorant Infant", "Playfair Display", "Lora",
+    "PT Serif", "EB Garamond", "Merriweather", "Noto Serif", "Prata", "Forum", "Alice",
+    "Literata", "Spectral", "Source Serif 4", "IBM Plex Serif", "Roboto Slab", "Philosopher",
+)
+CYRILLIC_SANS = (
+    "Manrope", "Inter", "Montserrat", "Raleway", "Rubik", "Nunito", "Nunito Sans", "Open Sans",
+    "Roboto", "PT Sans", "Noto Sans", "Jost", "Golos Text", "Onest", "Fira Sans", "IBM Plex Sans",
+    "Exo 2", "Ubuntu", "Tenor Sans", "Comfortaa", "Unbounded", "Oswald", "Roboto Condensed",
+)
+_CYRILLIC = {f.casefold(): f for f in CYRILLIC_SERIF + CYRILLIC_SANS}
+_SERIF_HINTS = ("serif", "garamond", "playfair", "fraunces", "bodoni", "didot", "baskerville",
+                "caslon", "cormorant", "dm serif", "libre", "crimson", "prata", "gloock", "instrument serif")
+
+
+def cyrillic_font(name: str, *, role: str) -> str:
+    """Return a Cyrillic-capable Google Font close in spirit to `name`."""
+    key = " ".join(str(name).split()).casefold()
+    if key in _CYRILLIC:
+        return _CYRILLIC[key]
+    if any(h in key for h in _SERIF_HINTS) and "sans" not in key:
+        return "Cormorant Garamond" if role == "heading" else "Lora"
+    if any(h in key for h in ("grotesk", "display", "syne", "clash", "unbounded")) and role == "heading":
+        return "Unbounded"
+    return "Manrope"
+
+
+def cyrillic_safe_fonts(ds: DesignSystem) -> DesignSystem:
+    heading = cyrillic_font(ds.heading_font, role="heading")
+    body = cyrillic_font(ds.body_font, role="body")
+    if body in CYRILLIC_SERIF and body not in ("Lora", "PT Serif", "Literata", "Spectral", "Source Serif 4", "IBM Plex Serif", "Noto Serif", "Merriweather"):
+        body = "Manrope"  # Display serifs are unreadable as 16px body copy.
+    return ds.model_copy(update={"heading_font": heading, "body_font": body})

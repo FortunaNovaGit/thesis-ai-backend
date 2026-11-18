@@ -11,3 +11,7 @@ Requires `pip install playwright` and `/usr/bin/chromium` (or adapt the script f
 
 - `python qa/v094_breakout_smoke.py`: synthetic WordPress-like **770px narrow theme** forced on a 1440px viewport; checks full-bleed, theme title hidden, overflow, CTA at 1440/900/390/320. Does **not** access WordPress or OpenAI.
 - `python qa/visual_audit.py --url 'https://your-staging-url/' --output qa/evidence`: actual staging screenshot + DOM checks with `narrow_ai_canvas`, `duplicate_theme_page_title`, `large_decorative_placeholder`, `offscreen_ai_section`. Requires optional Playwright. For a private preview use a locally created `--storage-state` and keep that file confidential. Browser-based aesthetic judgement and automated repair are not yet implemented.
+
+## v0.12 Rich Visual System preview
+
+- `python qa/rich_preview.py <out> --plugin <path-to>/thesis-ai-bridge [--direction warm|minimal] [--tag name]`: compiles a 7-section Fortuna Nova Home with the real compiler, emulates Elementor's per-widget CSS at the same specificity (`.elementor-<post> .elementor-element.elementor-element-<id>`), loads `front.css` + `visual-composer.css` + `rich-sections.css`, and captures 1440/390 screenshots with and without a hero photo. Asserts: no horizontal overflow, no clipped headings, exactly one H1, no JS errors. Synthetic evidence only — not a live Elementor render.
