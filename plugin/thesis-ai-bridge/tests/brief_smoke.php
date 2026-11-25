@@ -23,7 +23,7 @@ $brief = $collect->invoke(null, [
     'brief_products' => "Асорті 16 цукерок\nАсорті 24 цукерки\nАсорті 16 цукерок",
 ]);
 assert($brief['brand'] === 'Fortuna Nova');
-assert($brief['media_mode'] === 'generate_concepts');
+assert($brief['media_mode'] === 'auto' && $brief['media_mode_v'] === '13');
 assert($brief['product_count'] === '24');
 assert($brief['colors'] === '#382219, #EACD9B');
 assert($brief['assets'] === 'none');
@@ -44,7 +44,9 @@ $invalid = $collect->invoke(null, [
     'brief_hero_secondary_image_id' => '123',
 ]);
 assert($invalid['colors'] === '' && $invalid['product_count'] === '' && $invalid['assets'] === 'unsure');
-assert($invalid['media_mode'] === 'reuse_only');
+assert($invalid['media_mode'] === 'auto');
+$optout = $collect->invoke(null, ['brief_media_mode' => 'reuse_only']);
+assert($optout['media_mode'] === 'reuse_only');
 assert($invalid['hero_image_id'] === '');
 assert($invalid['hero_secondary_image_id'] === '123');
 echo "PASS: sanitized optional brief, preserved truthful constraints, rejected invalid fields\n";

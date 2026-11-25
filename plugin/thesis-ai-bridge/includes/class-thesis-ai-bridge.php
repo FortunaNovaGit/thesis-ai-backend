@@ -325,7 +325,7 @@ final class Thesis_AI_Bridge {
         $preferred = is_array($state) ? absint($state['brief']['hero_image_id'] ?? 0) : 0;
         $secondary = is_array($state) ? absint($state['brief']['hero_secondary_image_id'] ?? 0) : 0;
         $items = get_posts(['post_type' => 'attachment', 'post_status' => 'inherit',
-            'post_mime_type' => 'image', 'posts_per_page' => 25,
+            'post_mime_type' => 'image', 'posts_per_page' => 40,
             'orderby' => 'date', 'order' => 'DESC']);
         // The admin-selected image may be older than the 25 most recent files.
         foreach (array_unique(array_filter([$preferred, $secondary])) as $chosen) {

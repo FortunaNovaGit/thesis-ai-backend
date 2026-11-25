@@ -29,6 +29,34 @@ FONTS = "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0
 FA = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css"
 ART = '''<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1400"><defs><radialGradient id="g" cx=".35" cy=".3" r=".9"><stop stop-color="#a1704a"/><stop offset=".55" stop-color="#4a2c1e"/><stop offset="1" stop-color="#1c110c"/></radialGradient></defs><rect width="1200" height="1400" fill="url(#g)"/><g fill="#d9b27c" opacity=".85"><circle cx="420" cy="620" r="150"/><circle cx="760" cy="760" r="120"/><circle cx="560" cy="930" r="135"/></g><g fill="#3a2117"><circle cx="420" cy="620" r="118"/><circle cx="760" cy="760" r="92"/><circle cx="560" cy="930" r="104"/></g></svg>'''
 IMAGE = "data:image/svg+xml;charset=utf-8," + quote(ART)
+IMAGES_BY_URL: dict[str, str] = {}
+
+
+def concept_art(seed: int, w: int, h: int) -> str:
+    """Offline stand-in for a generated still life (no paid API in QA):
+    shaded truffle spheres, bokeh and vignette, varied per slot."""
+    import random
+    rnd = random.Random(seed)
+    tones = [("#6b4029", "#2a160e", "#d7a86e"), ("#8a5a3a", "#3a2216", "#f0c890"),
+             ("#4d3226", "#160c08", "#c99a62"), ("#a2754c", "#4a2c1e", "#f5dcae")][seed % 4]
+    spheres = []
+    for i in range(rnd.randint(3, 6)):
+        r = rnd.randint(int(h * .09), int(h * .17))
+        cx, cy = rnd.randint(int(w * .18), int(w * .85)), rnd.randint(int(h * .5), int(h * .82))
+        spheres.append(f'<ellipse cx="{cx}" cy="{cy + r * .92:.0f}" rx="{r * 1.05:.0f}" ry="{r * .22:.0f}" fill="#000" opacity=".35" filter="url(#b2)"/>'
+                       f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="url(#s{i % 2})"/>'
+                       f'<path d="M{cx - r * .55:.0f} {cy - r * .35:.0f} q{r * .55:.0f} -{r * .35:.0f} {r * 1.1:.0f} 0" stroke="{tones[2]}" stroke-width="{max(2, r // 14)}" fill="none" opacity=".75"/>')
+    bokeh = "".join(f'<circle cx="{rnd.randint(0, w)}" cy="{rnd.randint(0, int(h * .45))}" r="{rnd.randint(18, 70)}" fill="{tones[2]}" opacity="{rnd.uniform(.08, .3):.2f}"/>' for _ in range(14))
+    return ("data:image/svg+xml;charset=utf-8," + quote(
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">'
+        f'<defs><radialGradient id="bg" cx="{rnd.uniform(.25, .75):.2f}" cy=".25" r="1"><stop stop-color="{tones[0]}"/><stop offset="1" stop-color="{tones[1]}"/></radialGradient>'
+        f'<radialGradient id="s0" cx=".35" cy=".3" r=".75"><stop stop-color="#8b5a3c"/><stop offset=".55" stop-color="#3b2116"/><stop offset="1" stop-color="#120905"/></radialGradient>'
+        f'<radialGradient id="s1" cx=".35" cy=".3" r=".75"><stop stop-color="#f3e2c4"/><stop offset=".6" stop-color="#b98d5e"/><stop offset="1" stop-color="#5a3a24"/></radialGradient>'
+        f'<radialGradient id="v" cx=".5" cy=".5" r=".75"><stop offset=".55" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".55"/></radialGradient>'
+        f'<filter id="b"><feGaussianBlur stdDeviation="14"/></filter><filter id="b2"><feGaussianBlur stdDeviation="9"/></filter></defs>'
+        f'<rect width="{w}" height="{h}" fill="url(#bg)"/><g filter="url(#b)">{bokeh}</g>'
+        f'<rect y="{h * .62:.0f}" width="{w}" height="{h * .38:.0f}" fill="#000" opacity=".18"/>{"".join(spheres)}'
+        f'<rect width="{w}" height="{h}" fill="url(#v)"/></svg>'))
 
 
 def fortuna_home(with_media: bool, direction: str = "warm") -> tuple[PageExperienceSpec, PageLayoutSpec, DesignSystem, list[dict]]:
@@ -241,7 +269,8 @@ def render(node: dict, css: list[str], counter: list[int]) -> str:
     elif kind == "button":
         child = f'<div class="elementor-button-wrapper"><a class="elementor-button elementor-size-{s.get("size", "md")}" href="#"><span class="elementor-button-content-wrapper"><span class="elementor-button-text">{escape(str(s.get("text", "")))}</span></span></a></div>'
     elif kind == "image":
-        child = f'<img src="{IMAGE}" alt="Synthetic test graphic" width="1200" height="1400">'
+        url = str(node.get("settings", {}).get("image", {}).get("url", ""))
+        child = f'<img src="{IMAGES_BY_URL.get(url, IMAGE)}" alt="Synthetic test graphic" width="1200" height="1400">'
     elif kind == "icon":
         icon = escape(str((s.get("selected_icon") or {}).get("value", "")), quote=True)
         child = f'<div class="elementor-icon-wrapper"><div class="elementor-icon"><i class="{icon}" aria-hidden="true"></i></div></div>' if icon else ICON_SVG
@@ -306,10 +335,19 @@ def main() -> None:
     css_files = [assets / "front.css", assets / "visual-composer.css", assets / "rich-sections.css"]
     results = []
     variants = {}
-    for with_media in (False, True):
-        page, layout, ds, media = fortuna_home(with_media, args.direction)
+    from app.media_pipeline import page_media_slots, SIZES
+    for mode in ("type", "photo", "auto"):
+        page, layout, ds, media = fortuna_home(mode != "type", args.direction)
+        if mode == "auto":
+            # v0.13: every manifest slot filled with a (synthetic) generated concept.
+            media = []
+            for i, slot in enumerate(page_media_slots(page.page_slug, page.sections)):
+                url = f"https://wp.local/ai-{slot['key']}.webp"
+                w, h = (int(x) for x in SIZES.get(slot["kind"], "1024x1024").split("x"))
+                IMAGES_BY_URL[url] = concept_art(i + 3, w, h)
+                media.append({"id": 300 + i, "url": url, "ai_generated_role": slot["key"]})
         elements = compile_elementor_page(page, ds, media=media, layout=layout, product_names=["Асорті 16 цукерок", "Асорті 24 цукерки"])
-        name = f"{args.tag}-{'photo' if with_media else 'type'}"
+        name = f"{args.tag}-{mode}"
         html = build_html(elements, css_files, ds)
         (out / f"{name}.html").write_text(html)
         variants[name] = html

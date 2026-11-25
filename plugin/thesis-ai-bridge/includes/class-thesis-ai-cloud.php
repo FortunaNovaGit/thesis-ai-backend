@@ -88,6 +88,14 @@ final class Thesis_AI_Cloud {
         return is_array($value) ? array_values($value) : [];
     }
 
+    /** v0.13: "auto" unless the owner explicitly chose existing photos only.
+     * Briefs saved before 0.13 had "reuse_only" as an implicit default, so they
+     * are treated as "auto" until the owner saves the new choice. */
+    public static function brief_media_mode(array $brief): string {
+        if (empty($brief['media_mode_v'])) { return 'auto'; }
+        return (($brief['media_mode'] ?? '') === 'reuse_only') ? 'reuse_only' : 'auto';
+    }
+
     public static function ui_state(): array {
         $value = get_option(self::OPTION_UI_STATE, []);
         return is_array($value) ? $value : [];
@@ -290,15 +298,15 @@ final class Thesis_AI_Cloud {
             return $active;
         }
 
-        // Fail before spending text-agent tokens if paid media mode is not
-        // actually configured on Render.
-        $requested_media = (self::ui_state()['brief']['media_mode'] ?? '') === 'generate_concepts';
+        // v0.13: automatic imagery unless the owner opted out. If Render is not
+        // configured for images, the build continues truthfully without them.
+        $requested_media = self::brief_media_mode((array)(self::ui_state()['brief'] ?? [])) === 'auto';
+        $media_note = '';
         if ($requested_media) {
             $health = self::backend_request('GET', '/health', null, 10);
-            if (is_wp_error($health)) { return $health; }
-            if (empty($health['image_generation_ready'])) {
-                return new WP_Error('thesis_ai_media_not_ready',
-                    'AI image generation is not enabled/configured on Render. Set ENABLE_IMAGE_GENERATION=true and OPENAI_API_KEY, or choose existing images only.');
+            if (is_wp_error($health) || empty($health['image_generation_ready'])) {
+                $requested_media = false;
+                $media_note = 'AI-зображення вимкнені на Render (ENABLE_IMAGE_GENERATION / OPENAI_API_KEY). Сайт збудується з власними фото та типографічною композицією.';
             }
         }
         $snapshot = Thesis_AI_Bridge::execute_named_ability('get-site-snapshot', []);
@@ -327,7 +335,7 @@ final class Thesis_AI_Cloud {
             'detail' => sanitize_text_field((string)($body['detail'] ?? 'Multi-agent planning queued')),
             'prompt' => $prompt,
             'renderer' => $renderer,
-            'media_mode' => (string)((self::ui_state()['brief']['media_mode'] ?? '') === 'generate_concepts' ? 'generate_concepts' : 'reuse_only'),
+            'media_mode' => $requested_media ? 'generate_concepts' : 'reuse_only',
             'media_completed' => false,
             'executions' => [],
             'repair_attempts' => 0,
@@ -339,6 +347,9 @@ final class Thesis_AI_Cloud {
         $active['updated_at'] = gmdate('c');
         update_option(self::OPTION_ACTIVE_BUILD, $active, false);
         self::log_event('info', __('Build запущено. Аналізуємо запит і поточний стан сайту.', 'thesis-ai-bridge'), ['stage' => 'orchestrator', 'run_id' => (string)$active['job_id']]);
+        if ($media_note !== '') {
+            self::log_event('warning', $media_note, ['stage' => 'media', 'run_id' => (string)$active['job_id']]);
+        }
         self::kick_worker();
         return $active;
     }
@@ -561,7 +572,7 @@ final class Thesis_AI_Cloud {
             $active['status'] = 'media';
             $active['stage'] = 'media_generation';
             $active['progress'] = 28;
-            $active['detail'] = 'Creative plan passed. Creating approved editorial concept images.';
+            $active['detail'] = 'Creative plan passed. Creating AI images for every page section.';
             $active['updated_at'] = gmdate('c');
             update_option(self::OPTION_ACTIVE_BUILD, $active, false);
             self::log_event('info', 'План успішний. Починаємо генерацію AI-концептів.', ['stage' => 'media']);
@@ -608,7 +619,23 @@ final class Thesis_AI_Cloud {
         return $active;
     }
 
-    /** An opt-in media pipeline that runs in short WP-Cron steps (no long PHP/504). */
+    private static function is_media_slot(string $role): bool {
+        return (bool)preg_match('/^[a-z0-9][a-z0-9-]{1,31}$/', $role);
+    }
+
+    /** Continue the validated plan without generated media (never a failed build). */
+    private static function skip_media(array $active, string $reason): array {
+        $active['media_completed'] = true;
+        $active['phase'] = 'planning';
+        $active['status'] = 'planning';
+        $active['detail'] = sanitize_text_field($reason);
+        $active['updated_at'] = gmdate('c');
+        update_option(self::OPTION_ACTIVE_BUILD, $active, false);
+        self::log_event('warning', (string)$active['detail'], ['stage' => 'media', 'run_id' => (string)($active['job_id'] ?? '')]);
+        return $active;
+    }
+
+    /** Automatic media pipeline that runs in short WP-Cron steps (no long PHP/504). */
     private static function poll_media(array $active): array|WP_Error {
         $c = self::full_connection();
         if (!$c) { return new WP_Error('thesis_ai_media_connection', 'Backend connection is missing.'); }
@@ -617,9 +644,14 @@ final class Thesis_AI_Cloud {
         $media_id = (string)($active['media_job_id'] ?? '');
         if ($media_id === '') {
             $state = self::ui_state();
-            $has_owner_hero = !empty($state['brief']['hero_image_id']);
-            $roles = $has_owner_hero ? ['collection', 'story'] : ['hero', 'collection', 'story'];
-            $roles = array_values(array_intersect($roles, (array)($active['media_manifest_roles'] ?? $roles)));
+            // Every slot of the validated plan, except those the owner already
+            // filled with a real photo. Never generate what will not be used.
+            $skip = [];
+            if (!empty($state['brief']['hero_image_id'])) { $skip[] = 'hero'; }
+            if (!empty($state['brief']['hero_secondary_image_id'])) { $skip[] = 'hero-detail'; }
+            $roles = array_values(array_filter((array)($active['media_manifest_roles'] ?? []),
+                static fn($role): bool => is_string($role) && self::is_media_slot($role) && !in_array($role, $skip, true)));
+            $roles = array_slice(array_values(array_unique($roles)), 0, 12);
             if (!$roles) {
                 $active['media_completed'] = true;
                 $active['phase'] = 'planning';
@@ -629,7 +661,10 @@ final class Thesis_AI_Cloud {
             }
             $started = self::backend_request('POST', $site_path . '/media-jobs',
                 ['plan_job_id' => $plan_id, 'roles' => $roles], 15, $c);
-            if (is_wp_error($started)) { return $started; }
+            if (is_wp_error($started)) {
+                // Quota reached / generation disabled: build without AI images.
+                return self::skip_media($active, 'AI-зображення пропущено: ' . $started->get_error_message());
+            }
             if (empty($started['job_id'])) { return new WP_Error('thesis_ai_media_id', 'No media job identifier.'); }
             $active['media_job_id'] = sanitize_text_field((string)$started['job_id']);
             $active['media_uploaded'] = [];
@@ -644,9 +679,9 @@ final class Thesis_AI_Cloud {
         if (is_wp_error($job)) { return $job; }
         $status = (string)($job['status'] ?? '');
         if ($status === 'failed') {
+            // A failed image batch must not throw away a validated site plan.
             $message = sanitize_text_field((string)($job['error'] ?? 'Image generation failed'));
-            self::finalize_failed_build($active, $message, 'media');
-            return new WP_Error('thesis_ai_media_failed', $message);
+            return self::skip_media($active, 'AI-зображення не згенеровано (' . $message . '). Сайт будується без них.');
         }
         if ($status !== 'completed') {
             $active['progress'] = 29;
@@ -659,7 +694,9 @@ final class Thesis_AI_Cloud {
         foreach ($assets as $asset) {
             if (!is_array($asset) || empty($asset['key'])) { continue; }
             $key = sanitize_key((string)$asset['key']);
-            if (!in_array($key, ['hero', 'collection', 'story'], true)) { return new WP_Error('thesis_ai_media_role', 'Unknown media role.'); }
+            if (!self::is_media_slot($key) || !in_array($key, (array)($active['media_manifest_roles'] ?? []), true)) {
+                return new WP_Error('thesis_ai_media_role', 'Unknown media role.');
+            }
             if (in_array($key, (array)($active['media_uploaded'] ?? []), true)) { continue; }
             $attachment = self::sideload_concept_image($c, $media_id, $key, $asset);
             if (is_wp_error($attachment)) { return $attachment; }

@@ -219,4 +219,4 @@ def test_bridge_accepts_rich_settings_and_enqueues_stylesheet():
         assert key in php
     assert "assets/rich-sections.css" in php
     assert "--tai-heading-font" in php
-    assert "Version: 0.12.0" in (PLUGIN / "thesis-ai-bridge.php").read_text()
+    assert "Version: 0.13.0" in (PLUGIN / "thesis-ai-bridge.php").read_text()

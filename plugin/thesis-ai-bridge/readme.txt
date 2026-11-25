@@ -3,7 +3,7 @@ Contributors: thesis-prototype
 Tags: ai, elementor, abilities-api, automation, wordpress
 Requires at least: 6.6
 Requires PHP: 8.0
-Stable tag: 0.12.0
+Stable tag: 0.13.0
 License: GPLv2 or later
 
 Controlled local WordPress execution layer for a five-agent master's thesis prototype.
@@ -31,6 +31,12 @@ Version 0.11.0 adds safe generative Elementor section geometry and responsive ar
 6. Keep the builder page open or return later; build state is persisted in WordPress.
 7. Review generated drafts in Elementor.
 8. Publish only after explicit administrator confirmation.
+
+== v0.13.0 Auto Imagery ==
+* AI images are generated automatically for every page opening and image-friendly section (up to 10 per build) unless the owner chooses "existing photos only".
+* Owner-selected photos always take priority; generated images are native, replaceable Elementor Image widgets labelled as AI concepts.
+* If image generation is not enabled on the backend, or a batch fails, the site is built without AI images instead of failing.
+* Requires backend 0.13.0.
 
 == v0.12.0 Rich Visual System ==
 * New scoped stylesheet assets/rich-sections.css (only AI-owned pages, only sections compiled by backend 0.12).

@@ -45,6 +45,14 @@ def choose_matching_media(query: str, media: list[dict[str, Any]]) -> dict[str, 
     return best
 
 
+def _ai_role(item: dict[str, Any] | None) -> str:
+    return str((item or {}).get("ai_generated_role") or "")
+
+
+def _ai_slot_media(media: list[dict[str, Any]], key: str) -> dict[str, Any] | None:
+    return next((m for m in media if _ai_role(m) == key and _validated_media_url(m)), None)
+
+
 def choose_page_media(page: PageExperienceSpec, media: list[dict[str, Any]]) -> dict[str, Any] | None:
     # An explicitly selected WP attachment is stronger evidence of media intent
     # than weak AI-text stem matching. This applies only to the homepage.
@@ -52,9 +60,12 @@ def choose_page_media(page: PageExperienceSpec, media: list[dict[str, Any]]) -> 
         for item in media:
             if item.get("preferred_home_hero") and _validated_media_url(item):
                 return item
-        for item in media:
-            if item.get("ai_generated_role") == "hero" and _validated_media_url(item):
-                return item
+    # v0.13: each page owns its generated opening image (home: "hero",
+    # other pages: "<slug>-hero"). Never borrowed from another page.
+    from .media_pipeline import slot_prefix
+    generated = _ai_slot_media(media, f"{slot_prefix(page.page_slug)}hero")
+    if generated is not None:
+        return generated
     text = " ".join([page.page_name, page.page_goal] +
                     [" ".join([sec.heading, sec.body]) for sec in page.section_specs])
     # AI concepts are assigned explicitly by role. Never repurpose an
@@ -63,19 +74,18 @@ def choose_page_media(page: PageExperienceSpec, media: list[dict[str, Any]]) -> 
 
 
 def choose_secondary_page_media(page: PageExperienceSpec, media: list[dict[str, Any]], primary: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Only the site owner's explicitly chosen second Hero image is eligible.
-
-    Never take an arbitrary product photo from the Media Library to fill a collage.
-    """
+    """The owner's explicitly chosen second Hero image, else the generated
+    home "hero-detail" concept. Never an arbitrary product photo from the
+    Media Library to fill a collage."""
     if page.page_slug != "home" or primary is None:
         return None
     for item in media:
         if (item.get("preferred_home_hero_secondary") and _validated_media_url(item)
                 and item.get("id") != primary.get("id")):
             return item
-    # Collection concept belongs inside the collection section, not twice
-    # in the Hero and the catalogue. A second Hero image must be explicitly
-    # provided by the owner; otherwise collage downgrades to a single image.
+    detail = _ai_slot_media(media, "hero-detail")
+    if detail is not None and detail.get("id") != primary.get("id"):
+        return detail
     return None
 
 
@@ -673,7 +683,7 @@ def contact(section: SectionContentSpec, ds: DesignSystem, *, emphasis: str = "b
     pairs = _split_items(section.items)
     left = _container(_intro(section, ds, emphasis=emphasis), {
         "content_width": "full", "width": _pct(54), "width_mobile": _pct(100),
-        "padding": _box(12, 12, 12, 12), "gap": _px(16),
+        "padding": _box(12, 12, 12, 12), "gap": _px(16), "css_classes": "tai-contact-copy",
     })
     side_elements: list[dict[str, Any]] = [_heading("Як зв’язатися", ds.text, ds, level="h3", size=24)]
     used: set[str] = set()
@@ -826,6 +836,68 @@ def _apply_generative_layout(element: dict[str, Any], spec: SectionLayoutSpec, *
                 card["settings"]["width_mobile"] = _pct(100)
 
 
+SPLIT_MEDIA_TYPES = {"services", "benefits", "process", "trust", "content"}
+BACKDROP_MEDIA_TYPES = {"statement", "cta"}
+
+
+def _find(element: dict[str, Any], css_class: str) -> dict[str, Any] | None:
+    for child in element.get("elements", []):
+        if css_class in child.get("settings", {}).get("css_classes", "").split():
+            return child
+        found = _find(child, css_class)
+        if found is not None:
+            return found
+    return None
+
+
+def attach_section_media(element: dict[str, Any], section_type: str, item: dict[str, Any], key: str,
+                         *, flip: bool = False) -> None:
+    """Place one generated concept into its own section as a native Image
+    widget (always replaceable in Elementor). Placement depends on the type:
+    split header (cards), wide band (products), backdrop (statement/CTA),
+    or the side column (FAQ / contact / booking)."""
+    from .media_pipeline import LEGACY_ROLES
+    role_class = key if key in LEGACY_ROLES else section_type
+    visual = _container([_image_widget(item)], {
+        "content_width": "full", "padding": _box(0, 0, 0, 0), "width": _pct(100),
+        "css_classes": (f"tai-editorial-media tai-editorial-media-{role_class} "
+                        f"tai-section-media tai-section-media-{section_type}"),
+    })
+    shell = element["settings"]
+    children = element.setdefault("elements", [])
+    head = children[0] if children else None
+    if section_type in BACKDROP_MEDIA_TYPES:
+        visual["settings"]["css_classes"] += " tai-bg-media"
+        children.insert(0, visual)
+        shell["css_classes"] += " tai-has-bg-media"
+        return
+    if section_type == "products":
+        # Wide editorial band under the heading, never inside a product card.
+        position = 1 if head is not None and "tai-section-head" in head.get("settings", {}).get("css_classes", "") else 0
+        children.insert(position, visual)
+        shell["css_classes"] += " tai-has-media"
+        return
+    if section_type in SPLIT_MEDIA_TYPES and head is not None \
+            and "tai-section-head" in head.get("settings", {}).get("css_classes", ""):
+        head["settings"].update({"width": _pct(50), "width_mobile": _pct(100)})
+        visual["settings"].update({"width": _pct(50), "width_mobile": _pct(100)})
+        children[0] = _container([head, visual], {
+            "content_width": "full", "flex_direction": "row", "flex_direction_mobile": "column",
+            "align_items": "center", "gap": _px(48), "padding": _box(0, 0, 0, 0),
+            "css_classes": "tai-split-head" + (" tai-split-flip" if flip else ""),
+        })
+        shell["css_classes"] += " tai-has-media"
+        return
+    column = (_find(element, "tai-faq-intro") if section_type == "faq" else None) \
+        or (_find(element, "tai-booking-copy") if section_type == "booking" else None) \
+        or (_find(element, "tai-contact-copy") if section_type == "contact" else None)
+    if column is not None:
+        column["elements"].append(visual)
+    else:
+        children.append(visual)
+    shell["css_classes"] += " tai-has-media"
+
+
 def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem, media: list[dict[str, Any]] | None = None, *, layout: PageLayoutSpec | None = None, live_catalog: bool = False, product_names: list[str] | None = None) -> list[dict[str, Any]]:
     elements: list[dict[str, Any]] = []
     specs = page.section_specs
@@ -839,6 +911,10 @@ def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem, media: li
     used_concepts: set[str] = set()
     used_anchors: set[str] = set()
     specs = balance_rhythm(list(specs))
+    from .media_pipeline import page_media_slots
+    section_slots = {slot["index"]: slot for slot in page_media_slots(page.page_slug, [s.section_type for s in specs])
+                     if slot["kind"] not in {"hero", "detail"}}
+    split_count = 0
     for index, section in enumerate(specs):
         key = " ".join(section.heading.casefold().split())
         if key in seen_headings or (index > 0 and key == page.page_name.casefold()):
@@ -861,7 +937,7 @@ def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem, media: li
             # A typography-only scene must not render an unused photo layer.
             requested_layout = section_layout(layout, index)
             if (requested_layout is not None and selected_image is not None
-                    and selected_image.get("ai_generated_role") == "hero"
+                    and bool(_ai_role(selected_image))
                     and requested_layout.hero_scene == "typographic"):
                 # Opt-in photography must not be discarded by a text-only scene.
                 requested_layout = requested_layout.model_copy(update={"hero_scene": "editorial", "visual_treatment": "media"})
@@ -886,29 +962,20 @@ def compile_elementor_page(page: PageExperienceSpec, ds: DesignSystem, media: li
         if section_type not in used_anchors and re.fullmatch(r"[a-z]{2,20}", section_type):
             used_anchors.add(section_type)
             element["settings"]["_element_id"] = section_type
-        # Put editorial AI concepts into distinct, native Elementor Image widgets.
-        # These are not WooCommerce product images. Only the home page receives
-        # the page-scoped editorial media created for its story/collection.
-        editorial_role = ("collection" if section_type == "products" else
-                          "story" if section_type in {"content", "benefits", "trust", "process"} else "")
-        if page.page_slug == "home" and editorial_role and editorial_role not in used_concepts:
-            candidate = next((m for m in (media or [])
-                if m.get("ai_generated_role") == editorial_role and _validated_media_url(m)), None)
-            if candidate:
-                used_concepts.add(editorial_role)
-                visual = _container([_image_widget(candidate)], {
-                    "content_width": "full", "css_classes": f"tai-editorial-media tai-editorial-media-{editorial_role}",
-                    "padding": _box(0, 0, 0, 0), "width": _pct(100),
-                })
-                # Editorial media comes before collection text/cards to establish
-                # hierarchy; it is never put inside a verified product card.
-                if editorial_role == "collection":
-                    element["elements"].insert(0, visual)
-                else:
-                    element["elements"].append(visual)
+        # v0.13: each image-friendly section receives the generated concept
+        # made for *its* slot (same deterministic slot map as the manifest).
+        slot = section_slots.get(index)
+        candidate = _ai_slot_media(media or [], slot["key"]) if slot else None
+        if index == 0 and section_type != "hero" and _ai_role(selected_image):
+            slot, candidate = {"key": _ai_role(selected_image)}, selected_image
+        if slot and candidate is not None and slot["key"] not in used_concepts:
+            used_concepts.add(slot["key"])
+            attach_section_media(element, section_type, candidate, slot["key"], flip=bool(split_count % 2))
+            if section_type in SPLIT_MEDIA_TYPES:
+                split_count += 1
         section_spec = section_layout(layout, index)
         if (section_spec is not None and section_type == "hero" and selected_image is not None
-                and selected_image.get("ai_generated_role") == "hero"
+                and bool(_ai_role(selected_image))
                 and section_spec.hero_scene == "typographic"):
             section_spec = section_spec.model_copy(update={"hero_scene": "editorial", "visual_treatment": "media"})
         if (section_spec is not None and section_type == "hero" and selected_image is None

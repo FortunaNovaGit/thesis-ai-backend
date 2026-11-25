@@ -83,7 +83,7 @@ class PullPlanRequest(BaseModel):
 
 class MediaJobRequest(BaseModel):
     plan_job_id: str = Field(min_length=30, max_length=48)
-    roles: list[str] = Field(default_factory=lambda: ["hero", "collection", "story"], max_length=3)
+    roles: list[str] = Field(default_factory=lambda: ["hero", "collection", "story"], min_length=1, max_length=12)
 
 class MediaRecompileRequest(BaseModel):
     plan_job_id: str = Field(min_length=30, max_length=48)
@@ -164,6 +164,8 @@ async def health() -> dict[str, Any]:
         "visual_composer": "bounded_hero_scenes_v1",
         "rich_sections": "rich_visual_system_v1",
         "cyrillic_font_guard": True,
+        "auto_imagery": "section_slots_v1",
+        "max_images_per_build": settings.max_images_per_build,
         "media_pipeline": "opt_in_ai_concepts_3_assets_v1",
         "image_generation_enabled": settings.enable_image_generation,
         "image_generation_ready": bool(settings.enable_image_generation and settings.openai_api_key),
@@ -357,14 +359,33 @@ async def get_plan(site_id: str, job_id: str, authorization: str | None = Header
 # The authenticated WordPress Pull worker requests generation only after the
 # normal five-agent plan and editorial quality gate have succeeded.
 async def _run_media_job(site_id: str, media_job_id: str, specs: list[dict[str, Any]]) -> None:
+    """Generate in small parallel batches. One failed image does not discard
+    the others: the job completes with the images that succeeded and the
+    compiler simply keeps the typographic layout for the missing slots."""
     try:
         media_store.update(site_id, media_job_id, status="running")
-        for spec in specs:
-            raw = await generate_concept(spec["prompt"], spec["size"],
-                api_key=settings.openai_api_key or "", model=settings.openai_image_model,
-                safety_identifier=hashlib.sha256(site_id.encode()).hexdigest()[:32])
-            media_store.save_asset(site_id, media_job_id, spec["key"], raw)
-        media_store.update(site_id, media_job_id, status="completed")
+        limit = asyncio.Semaphore(max(1, min(4, int(settings.image_generation_concurrency or 1))))
+        identifier = hashlib.sha256(site_id.encode()).hexdigest()[:32]
+
+        async def one(spec: dict[str, Any]) -> str | None:
+            async with limit:
+                try:
+                    raw = await generate_concept(spec["prompt"], spec["size"],
+                        api_key=settings.openai_api_key or "", model=settings.openai_image_model,
+                        safety_identifier=identifier)
+                except Exception:
+                    return None
+                media_store.save_asset(site_id, media_job_id, spec["key"], raw)
+                return spec["key"]
+
+        done = {key for key in await asyncio.gather(*(one(s) for s in specs)) if key}
+        if not done:
+            raise RuntimeError("no image was generated")
+        job = media_store.get(site_id, media_job_id) or {}
+        kept = [a for a in job.get("assets", []) if a.get("key") in done]
+        failed = len(specs) - len(done)
+        media_store.update(site_id, media_job_id, status="completed", assets=kept,
+                           error=(f"{failed} image(s) skipped by the provider" if failed else ""))
     except Exception as exc:
         # Avoid including HTTP headers, credentials or provider response bodies.
         media_store.update(site_id, media_job_id, status="failed",
@@ -386,8 +407,11 @@ async def start_media_job(site_id: str, payload: MediaJobRequest, authorization:
     bundle = job["result"]
     if not bundle.get("content_quality", {}).get("passed"):
         raise HTTPException(409, "Content Quality Gate has not passed")
-    from .media_pipeline import ALLOWED_ROLES
-    if not payload.roles or len(set(payload.roles)) != len(payload.roles) or not set(payload.roles) <= ALLOWED_ROLES:
+    from .media_pipeline import SLOT_RE, manifest_roles
+    # Roles must be slots of *this* validated plan; nothing else can be generated.
+    if (len(set(payload.roles)) != len(payload.roles)
+            or not all(SLOT_RE.fullmatch(r) for r in payload.roles)
+            or not set(payload.roles) <= manifest_roles(bundle)):
         raise HTTPException(422, "Unsupported or duplicated media roles")
     specs = [s for s in bundle.get("media_manifest", []) if s["role"] in payload.roles]
     if not specs:

@@ -1,4 +1,4 @@
-/* Thesis AI v0.12.0 — Rich Visual System.
+/* Thesis AI v0.12.0–0.13.0 — Rich Visual System (+ v0.13 section imagery).
    Loaded after front.css + visual-composer.css, ONLY on AI-owned pages.
    Every rule is scoped to sections compiled by v0.12 (.tai-rich), so pages
    built by older versions keep their previous look. Static, reviewed CSS —
@@ -271,3 +271,71 @@ body.thesis-ai-generated .elementor .tai-rich .wpcf7 input[type=submit]{
   body.thesis-ai-generated .elementor .tai-rich .tai-actions{flex-direction:column!important;align-items:stretch!important}
   body.thesis-ai-generated .elementor .tai-rich .tai-actions .elementor-button{width:100%;justify-content:center}
 }
+
+/* ---------- v0.13 Section imagery (generated concepts or owner photos) ----------
+   Every image is a native Elementor Image widget inside .tai-section-media,
+   so it can be replaced in the editor. Layout only; no image URLs in CSS. */
+body.thesis-ai-generated .elementor .tai-rich .tai-section-media{
+  position:relative;overflow:hidden;border-radius:calc(var(--r-radius) * 1.4);box-shadow:var(--r-shadow);
+  background:var(--r-surface);margin:0!important;max-width:100%}
+body.thesis-ai-generated .elementor .tai-rich .tai-section-media .elementor-widget-image,
+body.thesis-ai-generated .elementor .tai-rich .tai-section-media .elementor-widget-container{height:100%;margin:0}
+body.thesis-ai-generated .elementor .tai-rich .tai-section-media img{
+  display:block;width:100%!important;height:100%!important;max-height:none!important;object-fit:cover;aspect-ratio:4/3;
+  transition:transform 1.2s var(--r-ease)}
+body.thesis-ai-generated .elementor .tai-rich .tai-section-media:hover img{transform:scale(1.035)}
+/* Thin accent frame offset behind the photo: editorial, not a placeholder. */
+body.thesis-ai-generated .elementor .tai-rich .tai-section-media::after{
+  content:"";position:absolute;inset:10px;border:1px solid color-mix(in srgb,#fff 55%,transparent);
+  border-radius:calc(var(--r-radius) * 1.1);pointer-events:none;z-index:2}
+
+/* Split header: heading + lead beside a large image, alternating sides. */
+body.thesis-ai-generated .elementor .tai-rich .tai-split-head{
+  display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,1.08fr);align-items:center;gap:clamp(28px,5vw,72px)!important}
+body.thesis-ai-generated .elementor .tai-rich .tai-split-head>.e-con{width:auto!important;max-width:none!important;min-width:0}
+body.thesis-ai-generated .elementor .tai-rich .tai-split-head .tai-section-head{max-width:620px}
+body.thesis-ai-generated .elementor .tai-rich .tai-split-head.tai-split-flip{grid-template-columns:minmax(0,1.08fr) minmax(0,1fr)}
+body.thesis-ai-generated .elementor .tai-rich .tai-split-head.tai-split-flip>.tai-section-media{order:-1}
+body.thesis-ai-generated .elementor .tai-rich.tai-has-media .tai-split-head+.tai-card-grid{margin-top:clamp(12px,3vw,40px)}
+
+/* Products: wide cinematic band between heading and catalogue. */
+body.thesis-ai-generated .elementor .tai-rich .tai-section-media-products img{aspect-ratio:21/9}
+
+/* FAQ / contact / booking: image anchors the side column. */
+body.thesis-ai-generated .elementor .tai-rich :is(.tai-faq-intro,.tai-contact-copy,.tai-booking-copy) .tai-section-media{margin-top:clamp(12px,2vw,28px)!important}
+body.thesis-ai-generated .elementor .tai-rich :is(.tai-faq-intro,.tai-contact-copy,.tai-booking-copy) .tai-section-media img{aspect-ratio:5/4}
+
+/* Statement / CTA: full-bleed backdrop with a tone-matched veil (text stays readable). */
+body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich.tai-has-bg-media{--r-veil:var(--r-paper);--r-veil-strength:80%}
+body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich.tai-has-bg-media.tai-tone-soft{--r-veil:var(--r-surface)}
+body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich.tai-has-bg-media.tai-tone-dark{--r-veil:var(--r-ink);--r-veil-strength:64%}
+body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich.tai-has-bg-media.tai-tone-accent{--r-veil:var(--r-primary);--r-veil-strength:66%}
+body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich>.tai-bg-media{
+  position:absolute!important;inset:0!important;width:auto!important;max-width:none!important;margin:0!important;
+  z-index:0!important;border-radius:0;box-shadow:none;background:transparent}
+body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich>.tai-bg-media img{aspect-ratio:auto;height:100%!important}
+body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich>.tai-bg-media>.elementor-widget-image{width:100%!important;max-width:none!important;align-self:stretch!important;height:100%}
+body.thesis-ai-generated .elementor .tai-rich .tai-section-media>.elementor-widget-image{width:100%!important;max-width:none!important;align-self:stretch!important}
+body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich>.tai-bg-media::after{
+  inset:0;border:0;border-radius:0;z-index:1;
+  background:linear-gradient(180deg,color-mix(in srgb,var(--r-veil) var(--r-veil-strength),transparent),
+    color-mix(in srgb,var(--r-veil) calc(var(--r-veil-strength) + 12%),transparent))}
+body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich.tai-has-bg-media:hover>.tai-bg-media img{transform:none}
+body.thesis-ai-generated .elementor .thesis-ai-section.tai-rich.tai-has-bg-media{padding-top:clamp(96px,12vw,180px)!important;padding-bottom:clamp(96px,12vw,180px)!important}
+
+@media (prefers-reduced-motion:no-preference){
+  @supports (animation-timeline:view()){
+    body.thesis-ai-generated .elementor .tai-rich .tai-section-media:not(.tai-bg-media) img{
+      animation:tai-settle linear both;animation-timeline:view();animation-range:entry 0% cover 45%}
+  }
+}
+@keyframes tai-settle{from{transform:scale(1.12)}to{transform:scale(1)}}
+@media (max-width:900px){
+  body.thesis-ai-generated .elementor .tai-rich .tai-split-head,
+  body.thesis-ai-generated .elementor .tai-rich .tai-split-head.tai-split-flip{grid-template-columns:minmax(0,1fr)}
+  body.thesis-ai-generated .elementor .tai-rich .tai-split-head.tai-split-flip>.tai-section-media{order:0}
+  body.thesis-ai-generated .elementor .tai-rich .tai-section-media img{aspect-ratio:3/2}
+  body.thesis-ai-generated .elementor .tai-rich .tai-section-media-products img{aspect-ratio:16/10}
+}
+/* Narrow FAQ column: long Ukrainian words must not break mid-word. */
+body.thesis-ai-generated .elementor .tai-rich .tai-faq-intro .tai-h2 .elementor-heading-title{font-size:clamp(1.9rem,1.1rem + 1.7vw,2.7rem)!important}

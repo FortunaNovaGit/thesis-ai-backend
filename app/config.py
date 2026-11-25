@@ -35,7 +35,10 @@ class Settings(BaseSettings):
     # v0.11: image generation is disabled unless the operator opts in in Render.
     enable_image_generation: bool = False
     openai_image_model: str = "gpt-image-2.5-flare"
-    max_media_jobs_per_site_day: int = 2  # up to six images/day per connected site
+    max_media_jobs_per_site_day: int = 2  # two builds with images per site per day
+    # v0.13: one image per image-friendly section, capped per build (cost guard).
+    max_images_per_build: int = 10
+    image_generation_concurrency: int = 3
 
     # Legacy push settings retained only for old CLI/tests. v0.6+ WordPress Pull
     # execution means the cloud backend does not call WordPress to mutate it.

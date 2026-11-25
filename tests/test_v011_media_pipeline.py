@@ -28,11 +28,15 @@ def sample_bundle():
 def test_media_manifest_is_limited_and_editorial_not_sku_photo():
     _,bundle=sample_bundle()
     items=bundle["media_manifest"]
-    assert [i["role"] for i in items] == ["hero","collection","story"]
+    roles=[i["role"] for i in items]
+    # v0.13: the legacy home roles come first, then one slot per section.
+    assert roles[:3] == ["hero","story","collection"]
+    assert 3 < len(items) <= 10
     assert all("No text" in item["prompt"] and "not" in item["provenance"] for item in items)
     assert all("шоколад" in item["prompt"].lower() or "chocol" in item["prompt"].lower() for item in items)
     assert all(len(item["prompt"]) <= 1300 for item in items)
-    assert len({i["key"] for i in items}) == 3
+    assert len({i["key"] for i in items}) == len(items)
+    assert not any(item["kind"] in {"team","stats"} for item in items)
 
 
 def test_site_bound_asset_store_idempotency_and_expiry(tmp_path):
@@ -149,7 +153,7 @@ def test_bridge_media_is_explicit_and_does_not_allow_remote_html():
     admin=(root/'includes/class-thesis-ai-bridge-admin.php').read_text()
     bridge=(root/'includes/class-thesis-ai-bridge.php').read_text()
     assert 'name="brief_media_mode"' in admin
-    assert 'value="reuse_only"' in admin and 'value="generate_concepts"' in admin
+    assert 'value="reuse_only"' in admin and 'value="auto"' in admin
     assert "'media_mode'" in source and "'media_generation'" in source
     assert 'wp_remote_get(' in source and "'redirection' => 0" in source
     assert 'media_handle_sideload(' in source

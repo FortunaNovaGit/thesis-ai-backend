@@ -1,2 +1,2 @@
 """Backend's API version single source; plugin has its own matching release tag."""
-VERSION = "0.12.0"
+VERSION = "0.13.0"

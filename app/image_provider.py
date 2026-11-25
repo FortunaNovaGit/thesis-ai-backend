@@ -10,7 +10,7 @@ async def generate_concept(prompt: str, size: str, *, api_key: str, model: str,
                            safety_identifier: str = "") -> bytes:
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is not configured for image generation")
-    if size not in {"1024x1024", "1536x1024"}:
+    if size not in {"1024x1024", "1536x1024", "1024x1536"}:
         raise ValueError("Unsupported image dimensions")
     payload = {"model": model, "prompt": prompt, "n": 1, "size": size,
                "quality": "medium", "output_format": "webp"}
